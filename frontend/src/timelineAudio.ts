@@ -12,6 +12,14 @@ export const instruments = {
     guitar: "Guitar",
     bass: "Bass",
     synthKeys: "Synth keys",
+    electricPiano: "Electric piano",
+    organ: "Organ",
+    strings: "Strings",
+    flute: "Flute",
+    brass: "Brass",
+    synthLead: "Synth lead",
+    electricGuitar: "Electric guitar",
+    kick: "Kick drum",
 } as const;
 
 export type Instrument = keyof typeof instruments;
@@ -23,7 +31,14 @@ const presets = {
     guitar: { oscillator: { type: "sawtooth5" }, envelope: { attack: 0.003, decay: 0.18, sustain: 0.08, release: 0.075 } },
     bass: { oscillator: { type: "triangle" }, envelope: { attack: 0.018, decay: 0.2, sustain: 0.7, release: 0.06 } },
     synthKeys: { oscillator: { type: "square4" }, envelope: { attack: 0.045, decay: 0.25, sustain: 0.5, release: 0.16 } },
-} as const;
+    electricPiano: { oscillator: { type: "fmtriangle", modulationType: "sine", modulationIndex: 0.8, harmonicity: 3 }, envelope: { attack: 0.008, decay: 0.35, sustain: 0.18, release: 0.19 } },
+    organ: { oscillator: { type: "custom", partials: [1, 0.5, 0.3, 0.15] }, envelope: { attack: 0.015, decay: 0.1, sustain: 0.85, release: 0.075 } },
+    strings: { oscillator: { type: "fatsawtooth4", count: 3, spread: 25 }, envelope: { attack: 0.23, decay: 0.4, sustain: 0.5, release: 0.3 } },
+    flute: { oscillator: { type: "custom", partials: [1, 0.14, 0.07] }, envelope: { attack: 0.055, decay: 0.15, sustain: 0.78, release: 0.11 } },
+    brass: { oscillator: { type: "sawtooth6" }, envelope: { attack: 0.035, decay: 0.15, sustain: 0.54, release: 0.09 } },
+    synthLead: { oscillator: { type: "pulse", width: 0.35 }, envelope: { attack: 0.012, decay: 0.17, sustain: 0.59, release: 0.14 } },
+    electricGuitar: { oscillator: { type: "fatsawtooth9", count: 3, spread: 18 }, envelope: { attack: 0.007, decay: 0.24, sustain: 0.36, release: 0.08 } },
+} satisfies Record<Exclude<Instrument, "kick">, NonNullable<ConstructorParameters<typeof Tone.Synth>[0]>>;
 
 type AudioTrack = {
     instrument: Instrument;
@@ -39,7 +54,7 @@ export function createTimelineAudio(tracks: readonly AudioTrack[], loopSeconds: 
     let startedAt = 0;
     let stopped = false;
     // A voice pairs one block with its pitch and synth. The same voice is reused each loop.
-    const voices: { note: ScheduledNote; frequency: number; synth: Tone.Synth }[] = [];
+    const voices: { note: ScheduledNote; frequency: number; synth: Tone.Synth | Tone.MembraneSynth }[] = [];
 
     return {
         async start() {
@@ -64,7 +79,14 @@ export function createTimelineAudio(tracks: readonly AudioTrack[], loopSeconds: 
                         throw new Error(`Invalid note: ${note.note}`);
                     }
 
-                    const synth = new Tone.Synth(presets[instrument]).connect(gain);
+                    const synth = instrument === "kick"
+                        ? new Tone.MembraneSynth({
+                            pitchDecay: 0.04,
+                            octaves: 5,
+                            envelope: { attack: 0.001, decay: 0.23, sustain: 0.02, release: 0.15 },
+                        })
+                        : new Tone.Synth(presets[instrument]);
+                    synth.connect(gain);
                     voices.push({ note, frequency, synth });
                 }
             }
