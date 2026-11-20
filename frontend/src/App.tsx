@@ -1,64 +1,32 @@
+import { Box, MenuItem, TextField, Typography } from "@mui/material";
 import { useState } from "react";
-
-type GreetingResponse = {
-  message: string;
-};
+import SoundTimeline from "./SoundTimeline";
+import { demos } from "./demoTracks";
 
 export default function App() {
-    const [name, setName] = useState("");
-    const [message, setMessage] = useState("");
-    const [error, setError] = useState("");
-    const [loading, setLoading] = useState(false);
-
-    async function getGreeting() {
-        setLoading(true);
-        setError("");
-        setMessage("");
-
-        try {
-        const response = await fetch("http://localhost:8000/api/greet", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-            },
-            body: JSON.stringify({ name }),
-        });
-
-        if (!response.ok) {
-            throw new Error(`Request failed: ${response.status}`);
-        }
-
-        const data: GreetingResponse = await response.json();
-            setMessage(data.message);
-        } catch (error) {
-            setError(
-                error instanceof Error ? error.message : "Something went wrong."
-            );
-        } finally {
-            setLoading(false);
-        }
-    }
-
+    const [selectedDemo, setSelectedDemo] = useState(0);
+    const demo = demos[selectedDemo];
     return (
         <main style={{ padding: "2rem", fontFamily: "sans-serif" }}>
-            <h1>React + Python</h1>
 
-            <input
-                aria-label="Your name"
-                placeholder="Enter your name"
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-            />
-
-            <button
-                onClick={getGreeting}
-                disabled={loading || !name.trim()}
-            >
-                {loading ? "Loading..." : "Say hello"}
-            </button>
-
-            {message && <p>{message}</p>}
-            {error && <p role="alert">{error}</p>}
+            <Box component="section" sx={{ mt: 4}}>
+                <Typography variant="h4" component="h2" sx={{ mb: 2 }}>
+                    Music timeline experiment
+                </Typography>
+                <TextField
+                    select
+                    size="small"
+                    label="Demo"
+                    value={selectedDemo}
+                    onChange={(event) => setSelectedDemo(Number(event.target.value))}
+                    sx={{ mb: 2, minWidth: 160 }}
+                >
+                    {demos.map(({ name }, index) => (
+                        <MenuItem key={name} value={index}>{name}</MenuItem>
+                    ))}
+                </TextField>
+                <SoundTimeline key={demo.name} tracks={demo.tracks} loopSeconds={demo.loopSeconds} />
+            </Box>
         </main>
     );
 }
