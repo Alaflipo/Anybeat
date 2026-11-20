@@ -64,6 +64,85 @@ function demoTrack(id: string, name: string, instrument: SoundTrack["instrument"
     return { id, name, instrument, blocks: phrase(events) };
 }
 
+const jazz: Demo = {
+    name: "Jazz",
+    loopSeconds: 8,
+    tracks: [
+        demoTrack("keys", "Seventh-chord comping", "electricPiano", [
+            [0.34, 0.52, "F4", "A4", "C5", "E5"], [1.34, 0.35, "F4", "A4", "C5"],
+            [2.34, 0.52, "F4", "B4", "D5", "E5"], [3.34, 0.35, "F4", "B4", "D5"],
+            [4.34, 0.52, "E4", "G4", "B4", "D5"], [5.34, 0.35, "E4", "G4", "B4"],
+            [6.34, 0.52, "G4", "B4", "E5"], [7.34, 0.4, "G4", "C#5", "E5"],
+        ]),
+        demoTrack("bass", "Walking bass", "bass", [
+            [0, 0.44, "D2"], [0.5, 0.44, "F2"], [1, 0.44, "A2"], [1.5, 0.44, "Ab2"],
+            [2, 0.44, "G2"], [2.5, 0.44, "B2"], [3, 0.44, "D3"], [3.5, 0.44, "Db3"],
+            [4, 0.44, "C3"], [4.5, 0.44, "G2"], [5, 0.44, "E2"], [5.5, 0.44, "G#2"],
+            [6, 0.44, "A2"], [6.5, 0.44, "E3"], [7, 0.44, "G2"], [7.5, 0.44, "C#3"],
+        ]),
+        demoTrack("flute", "Swung flute line", "flute", [
+            [0.34, 0.15, "A5"], [0.5, 0.28, "F5"], [0.84, 0.12, "E5"], [1, 0.54, "D5"],
+            [2.34, 0.15, "B5"], [2.5, 0.28, "G5"], [2.84, 0.12, "F5"], [3, 0.54, "D5"],
+            [4.34, 0.15, "G5"], [4.5, 0.28, "E5"], [4.84, 0.12, "D5"], [5, 0.54, "C5"],
+            [6.34, 0.15, "E5"], [6.5, 0.28, "G5"], [6.84, 0.12, "A5"], [7, 0.67, "C#6"],
+        ]),
+    ],
+};
+
+const drumBreak: Demo = {
+    name: "Drum Break",
+    loopSeconds: 8,
+    tracks: [
+        demoTrack("kick", "Syncopated kick", "kick", [
+            [0, 0.15, "C1"], [0.75, 0.15, "C1"], [1, 0.15, "C1"], [1.625, 0.15, "C1"],
+            [2, 0.15, "C1"], [2.75, 0.15, "C1"], [3.125, 0.15, "C1"],
+            [4, 0.15, "C1"], [4.75, 0.15, "C1"], [5, 0.15, "C1"], [5.625, 0.15, "C1"],
+            [6, 0.15, "C1"], [6.75, 0.15, "C1"], [7, 0.15, "C1"], [7.75, 0.15, "C1"],
+        ]),
+        demoTrack("snare", "Snare backbeat", "snare", [
+            [0.5, 0.11, "D2"], [1.5, 0.11, "D2"], [1.875, 0.045, "D2"],
+            [2.5, 0.11, "D2"], [3.375, 0.045, "D2"], [3.5, 0.11, "D2"],
+            [4.5, 0.11, "D2"], [5.5, 0.11, "D2"], [5.875, 0.045, "D2"],
+            [6.5, 0.11, "D2"], [7.25, 0.045, "D2"], [7.375, 0.045, "D2"], [7.5, 0.11, "D2"],
+        ]),
+        demoTrack("hat", "Hi-hat pattern", "hiHat", [
+            // Short taps alternate with longer offbeat accents.
+            ...Array.from({ length: 32 }, (_, step): PhraseEvent =>
+                [step * 0.25, step % 4 === 3 ? 0.12 : 0.035, "F#2"]),
+            [1.875, 0.045, "F#2"], [3.875, 0.045, "F#2"],
+            [5.875, 0.045, "F#2"], [7.875, 0.045, "F#2"],
+        ]),
+        demoTrack("tom", "Descending tom fills", "tom", [
+            [3.25, 0.12, "A2"], [3.625, 0.12, "F2"], [3.875, 0.1, "D2"],
+            [7, 0.12, "A2"], [7.25, 0.12, "G2"], [7.5, 0.12, "F2"],
+            [7.625, 0.12, "E2"], [7.875, 0.1, "D2"],
+        ]),
+    ],
+};
+
+const pop: Demo = {
+    name: "Pop",
+    loopSeconds: 8,
+    tracks: [
+        demoTrack("lead", "Synth hook", "synthLead", [
+            [0.25, 0.23, "E5"], [0.5, 0.38, "G5"], [1, 0.7, "C6"],
+            [2.25, 0.23, "D5"], [2.5, 0.38, "G5"], [3, 0.7, "B5"],
+            [4.25, 0.23, "E5"], [4.5, 0.38, "A5"], [5, 0.7, "C6"],
+            [6.25, 0.23, "C6"], [6.5, 0.38, "A5"], [7, 0.7, "G5"],
+        ]),
+        demoTrack("keys", "Electric piano chords", "electricPiano", [
+            [0, 1.7, "C4", "E4", "G4"], [2, 1.7, "B3", "D4", "G4"],
+            [4, 1.7, "A3", "C4", "E4"], [6, 1.7, "A3", "C4", "F4"],
+        ]),
+        demoTrack("bass", "Bass pulse", "bass", [
+            [0, 0.8, "C2"], [1, 0.6, "C3"], [2, 0.8, "G2"], [3, 0.6, "G3"],
+            [4, 0.8, "A2"], [5, 0.6, "A3"], [6, 0.8, "F2"], [7, 0.6, "F3"],
+        ]),
+        demoTrack("kick", "Four-on-the-floor kick", "kick",
+            Array.from({ length: 16 }, (_, beat) => [beat * 0.5, 0.13, "C1"])),
+    ],
+};
+
 export const demos: readonly Demo[] = [
     { name: "Original", loopSeconds: 6.5, tracks: originalTracks },
     {
@@ -242,28 +321,7 @@ export const demos: readonly Demo[] = [
             ]),
         ],
     },
-    {
-        name: "Pop",
-        loopSeconds: 8,
-        tracks: [
-            demoTrack("lead", "Synth hook", "synthLead", [
-                [0.25, 0.23, "E5"], [0.5, 0.38, "G5"], [1, 0.7, "C6"],
-                [2.25, 0.23, "D5"], [2.5, 0.38, "G5"], [3, 0.7, "B5"],
-                [4.25, 0.23, "E5"], [4.5, 0.38, "A5"], [5, 0.7, "C6"],
-                [6.25, 0.23, "C6"], [6.5, 0.38, "A5"], [7, 0.7, "G5"],
-            ]),
-            demoTrack("keys", "Electric piano chords", "electricPiano", [
-                [0, 1.7, "C4", "E4", "G4"], [2, 1.7, "B3", "D4", "G4"],
-                [4, 1.7, "A3", "C4", "E4"], [6, 1.7, "A3", "C4", "F4"],
-            ]),
-            demoTrack("bass", "Bass pulse", "bass", [
-                [0, 0.8, "C2"], [1, 0.6, "C3"], [2, 0.8, "G2"], [3, 0.6, "G3"],
-                [4, 0.8, "A2"], [5, 0.6, "A3"], [6, 0.8, "F2"], [7, 0.6, "F3"],
-            ]),
-            demoTrack("kick", "Four-on-the-floor kick", "kick",
-                Array.from({ length: 16 }, (_, beat) => [beat * 0.5, 0.13, "C1"])),
-        ],
-    },
+    pop,
     {
         name: "Classical",
         loopSeconds: 12,
@@ -313,27 +371,93 @@ export const demos: readonly Demo[] = [
             ]),
         ],
     },
+    jazz,
+    drumBreak,
     {
-        name: "Jazz",
-        loopSeconds: 8,
+        name: "Jazz Drum Break",
+        loopSeconds: jazz.loopSeconds,
+        tracks: [...jazz.tracks, ...drumBreak.tracks],
+    },
+    {
+        name: "Pop Drum Break",
+        loopSeconds: pop.loopSeconds,
+        // The break supplies the kick for this arrangement.
+        tracks: [...pop.tracks.filter(({ id }) => id !== "kick"), ...drumBreak.tracks],
+    },
+    {
+        name: "Creativity",
+        loopSeconds: 16,
         tracks: [
-            demoTrack("keys", "Seventh-chord comping", "electricPiano", [
-                [0.34, 0.52, "F4", "A4", "C5", "E5"], [1.34, 0.35, "F4", "A4", "C5"],
-                [2.34, 0.52, "F4", "B4", "D5", "E5"], [3.34, 0.35, "F4", "B4", "D5"],
-                [4.34, 0.52, "E4", "G4", "B4", "D5"], [5.34, 0.35, "E4", "G4", "B4"],
-                [6.34, 0.52, "G4", "B4", "E5"], [7.34, 0.4, "G4", "C#5", "E5"],
+            // Four phrases move through C, A minor, F, and G before returning to C.
+            demoTrack("piano", "Opening piano motif", "piano", [
+                [0, 0.45, "C5"], [0.5, 0.22, "E5"], [0.75, 0.45, "G5"], [1.5, 0.75, "D5"],
+                [2.5, 0.35, "E5"], [3, 0.6, "G5"], [15.5, 0.4, "B4", "D5"],
             ]),
-            demoTrack("bass", "Walking bass", "bass", [
-                [0, 0.44, "D2"], [0.5, 0.44, "F2"], [1, 0.44, "A2"], [1.5, 0.44, "Ab2"],
-                [2, 0.44, "G2"], [2.5, 0.44, "B2"], [3, 0.44, "D3"], [3.5, 0.44, "Db3"],
-                [4, 0.44, "C3"], [4.5, 0.44, "G2"], [5, 0.44, "E2"], [5.5, 0.44, "G#2"],
-                [6, 0.44, "A2"], [6.5, 0.44, "E3"], [7, 0.44, "G2"], [7.5, 0.44, "C#3"],
+            demoTrack("guitar", "Acoustic arpeggios", "guitar", [
+                [0.25, 0.42, "C4"], [0.75, 0.42, "G4"], [1.25, 0.42, "E4"], [1.75, 0.42, "B4"],
+                [2.25, 0.42, "C4"], [2.75, 0.42, "G4"], [3.25, 0.42, "D4"], [3.75, 0.2, "E4"],
             ]),
-            demoTrack("flute", "Swung flute line", "flute", [
-                [0.34, 0.15, "A5"], [0.5, 0.28, "F5"], [0.84, 0.12, "E5"], [1, 0.54, "D5"],
-                [2.34, 0.15, "B5"], [2.5, 0.28, "G5"], [2.84, 0.12, "F5"], [3, 0.54, "D5"],
-                [4.34, 0.15, "G5"], [4.5, 0.28, "E5"], [4.84, 0.12, "D5"], [5, 0.54, "C5"],
-                [6.34, 0.15, "E5"], [6.5, 0.28, "G5"], [6.84, 0.12, "A5"], [7, 0.67, "C#6"],
+            demoTrack("flute", "Flute answers", "flute", [
+                [2, 0.42, "G5"], [2.5, 0.42, "E5"], [3.25, 0.55, "D5"],
+                [8.5, 0.65, "A5"], [9.5, 0.42, "G5"], [10, 0.7, "F5"],
+            ]),
+            demoTrack("strings", "String swells", "strings", [
+                [0, 3.5, "C4", "E4", "G4"], [7.75, 3.85, "F4", "A4", "C5"],
+                [12, 3.5, "G4", "B4", "D5"],
+            ]),
+            demoTrack("electric-piano", "Syncopated electric piano", "electricPiano", [
+                [4.25, 0.23, "G3", "C4", "E4"], [5.25, 0.23, "G3", "C4", "E4"],
+                [6.25, 0.23, "G3", "B3", "E4"], [7.25, 0.3, "G3", "C4", "E4"],
+                [12.25, 0.23, "F3", "B3", "D4"], [14.25, 0.23, "F3", "B3", "D4"],
+            ]),
+            demoTrack("bass", "Bass groove", "bass", [
+                [4, 0.52, "A2"], [4.75, 0.19, "E3"], [5, 0.4, "A2"], [5.75, 0.18, "G2"],
+                [6, 0.52, "A2"], [6.75, 0.19, "C3"], [7, 0.4, "E3"], [7.75, 0.18, "E2"],
+                [8, 1.15, "F2"], [9.5, 0.4, "C3"], [10, 1.15, "F2"], [11.5, 0.4, "F#2"],
+                [12, 0.52, "G2"], [12.75, 0.19, "D3"], [13, 0.4, "G2"],
+                [14, 0.52, "G2"], [14.75, 0.19, "B2"], [15, 0.7, "G2"],
+            ]),
+            demoTrack("brass", "Brass stabs", "brass", [
+                [4.5, 0.18, "E5", "A5"], [5.5, 0.18, "C5", "G5"], [7.5, 0.24, "E5", "G5"],
+                [12.5, 0.18, "D5", "G5"], [13.5, 0.18, "B4", "F5"], [15, 0.35, "D5", "G5"],
+            ]),
+            demoTrack("synth-keys", "Synth keys shimmer", "synthKeys", [
+                [8.25, 0.3, "C5"], [8.75, 0.25, "E5"], [9.25, 0.4, "F5"],
+                [10.25, 0.3, "C5"], [10.75, 0.25, "G5"], [11.25, 0.4, "A5"],
+            ]),
+            demoTrack("organ", "Organ responses", "organ", [
+                [8, 0.6, "F3", "C4"], [9, 0.6, "A3", "E4"], [10, 0.6, "F3", "C4"],
+                [11, 0.6, "A3", "C4"], [13, 0.5, "G3", "B3"], [15, 0.45, "G3", "F4"],
+            ]),
+            demoTrack("electric-guitar", "Electric guitar finale", "electricGuitar", [
+                [11.75, 0.22, "F3", "C4"], [12, 0.42, "G3", "D4"], [12.75, 0.22, "G3", "D4"],
+                [13.5, 0.38, "G3", "D4"], [14, 0.42, "G3", "D4"], [14.75, 0.22, "G3", "D4"],
+                [15.5, 0.25, "B3", "F4"],
+            ]),
+            demoTrack("synth-lead", "Final synth hook", "synthLead", [
+                [12, 0.45, "G5"], [12.5, 0.22, "B5"], [12.75, 0.45, "D6"], [13.5, 0.45, "A5"],
+                [14.25, 0.35, "G5"], [14.75, 0.4, "D6"], [15.25, 0.45, "B5"],
+            ]),
+            demoTrack("kick", "Kick groove", "kick", [
+                [4, 0.14, "C1"], [4.75, 0.14, "C1"], [5.5, 0.14, "C1"],
+                [6, 0.14, "C1"], [6.75, 0.14, "C1"], [7.5, 0.14, "C1"],
+                [8, 0.14, "C1"], [10, 0.14, "C1"], [12, 0.14, "C1"], [12.75, 0.14, "C1"],
+                [13.5, 0.14, "C1"], [14, 0.14, "C1"], [14.75, 0.14, "C1"], [15.5, 0.14, "C1"],
+            ]),
+            demoTrack("snare", "Snare backbeat", "snare", [
+                [4.5, 0.11, "D2"], [5.5, 0.11, "D2"], [6.5, 0.11, "D2"], [7.5, 0.11, "D2"],
+                [9.5, 0.1, "D2"], [11.5, 0.1, "D2"],
+                [12.5, 0.11, "D2"], [13.5, 0.11, "D2"], [14.5, 0.11, "D2"], [15.5, 0.11, "D2"],
+            ]),
+            demoTrack("hi-hat", "Hi-hat accents", "hiHat", [
+                ...[4, 12].flatMap((start) =>
+                    Array.from({ length: 16 }, (_, step): PhraseEvent =>
+                        [start + step * 0.25, step % 4 === 3 ? 0.11 : 0.035, "F#2"])),
+            ]),
+            demoTrack("tom", "Tom transitions", "tom", [
+                [7.625, 0.11, "A2"], [7.75, 0.11, "F2"], [7.875, 0.11, "D2"],
+                [11.5, 0.11, "A2"], [11.75, 0.11, "F2"], [11.875, 0.11, "D2"],
+                [15.625, 0.11, "A2"], [15.75, 0.11, "F2"], [15.875, 0.11, "D2"],
             ]),
         ],
     },

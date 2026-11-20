@@ -1,7 +1,10 @@
+import AddIcon from "@mui/icons-material/Add";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import StopIcon from "@mui/icons-material/Stop";
-import { Alert, Box, Button, MenuItem, Stack, TextField, Typography } from "@mui/material";
+import { Alert, Box, Button, IconButton, MenuItem, Stack, TextField, Typography } from "@mui/material";
 import { useEffect, useRef, useState } from "react";
+import NoteDialog from "./NoteDialog";
+import DraggableSoundBlock from "./DraggableSoundBlock";
 import { createTimelineAudio, instruments } from "./timelineAudio";
 import type { Instrument } from "./timelineAudio";
 
@@ -25,17 +28,9 @@ export type SoundTrack = {
 type SoundTimelineProps = {
     tracks: readonly SoundTrack[];
     loopSeconds: number;
-};
-
-// Color follows the note letter across octaves and accidentals.
-const noteColors: Partial<Record<string, { bgcolor: string; color: string }>> = {
-    C: { bgcolor: "#A7E3B8", color: "#17482A" },
-    D: { bgcolor: "#A1D7F5", color: "#153F5A" },
-    E: { bgcolor: "#B9BDF5", color: "#2E316C" },
-    F: { bgcolor: "#DBB4F3", color: "#4E2563" },
-    G: { bgcolor: "#F4A8AD", color: "#682630" },
-    A: { bgcolor: "#F7BD91", color: "#633616" },
-    B: { bgcolor: "#F5DB86", color: "#5A430F" },
+    onBlockAdd: (trackId: string, note: string) => void;
+    onBlockNoteChange: (trackId: string, blockId: string, note: string) => void;
+    onBlockMove: (trackId: string, blockId: string, start: number, duration: number) => void;
 };
 
 // Prepare the same note timings for the track display and the audio scheduler.
@@ -64,19 +59,22 @@ function layoutBlocks(blocks: readonly SoundBlock[], loopSeconds: number) {
     return { notes, laneCount: Math.max(1, laneEnds.length) };
 }
 
-export default function SoundTimeline({ tracks, loopSeconds }: SoundTimelineProps) {
+export default function SoundTimeline({ tracks, loopSeconds, onBlockAdd, onBlockNoteChange, onBlockMove }: SoundTimelineProps) {
     // The timeline element holds one CSS position inherited by all the playheads.
     const timeline = useRef<HTMLDivElement>(null);
     // The ref holds the current session's cleanup function, including during async startup.
     // Its identity lets us tell whether a Play request still owns the session.
     const playback = useRef<(() => void) | null>(null);
     // React state drives the button and instrument controls during startup and playback.
-    const [active, setActive] = useState<(SoundTimelineProps & {
+    const [active, setActive] = useState<(Pick<SoundTimelineProps, "tracks" | "loopSeconds"> & {
         status: "starting" | "playing";
         trackId: string | null;
     }) | null>(null);
     // Keep each dropdown choice by track ID and fall back to the track's configured instrument.
     const [selectedInstruments, setSelectedInstruments] = useState<Partial<Record<string, Instrument>>>({});
+    const [noteTarget, setNoteTarget] = useState<{ trackId: string; blockId?: string } | null>(null);
+    const noteTrack = tracks.find(({ id }) => id === noteTarget?.trackId);
+    const editedBlock = noteTrack?.blocks.find(({ id }) => id === noteTarget?.blockId);
     const [error, setError] = useState("");
     // Show the playback status only for the inputs that started that session.
     const currentSession = active?.tracks === tracks && active.loopSeconds === loopSeconds ? active : null;
@@ -171,9 +169,9 @@ export default function SoundTimeline({ tracks, loopSeconds }: SoundTimelineProp
 
             {error && <Alert severity="error">{error}</Alert>}
 
-            <Stack ref={timeline} spacing={2} aria-label="Sound tracks">
+            <Stack ref={timeline} spacing={2}>
                 {/* The ruler uses the same one-pixel inset as the bordered tracks. */}
-                <Box aria-hidden="true" sx={{ position: "relative", height: 20, mx: "1px" }}>
+                <Box sx={{ position: "relative", height: 20, mx: "1px" }}>
                     {ticks.map((second) => (
                         <Typography
                             key={second}
@@ -198,36 +196,45 @@ export default function SoundTimeline({ tracks, loopSeconds }: SoundTimelineProp
                         (currentSession.trackId === null || currentSession.trackId === id);
 
                     return (
-                        <Stack component="section" aria-label={name} key={id} spacing={1}>
+                        <Stack component="section" key={id} spacing={1}>
                             <Stack direction="row" spacing={2} sx={{ alignItems: "center", justifyContent: "space-between" }}>
-                                <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-                                    <Button
+                                <Stack direction="row" spacing={1} sx={{ alignItems: "center", flexWrap: "wrap" }}>
+                                    <IconButton
                                         size="small"
-                                        aria-label={soloStatus === "playing" ? `Stop ${name}` : `Play ${name}`}
-                                        startIcon={soloStatus === "playing" ? <StopIcon /> : <PlayArrowIcon />}
+                                        title={soloStatus === "playing" ? `Stop ${name}` : `Play ${name}`}
                                         disabled={!notes.length || soloStatus === "starting"}
                                         onClick={soloStatus === "playing" ? stop : () => void play(id)}
                                     >
-                                        {soloStatus === "playing" ? "Stop" : soloStatus === "starting" ? "Starting…" : "Play"}
-                                    </Button>
+                                        {soloStatus === "playing" ? <StopIcon /> : <PlayArrowIcon />}
+                                    </IconButton>
                                     <Typography component="h3" variant="subtitle1">{name}</Typography>
                                 </Stack>
-                                <TextField
-                                    select
-                                    size="small"
-                                    label={`Instrument`}
-                                    value={instrument}
-                                    disabled={status !== "stopped"}
-                                    onChange={(event) => {
-                                        const value = event.target.value as Instrument;
-                                        setSelectedInstruments((current) => ({ ...current, [id]: value }));
-                                    }}
-                                    sx={{ minWidth: 170 }}
-                                >
-                                    {Object.entries(instruments).map(([value, label]) => (
-                                        <MenuItem key={value} value={value}>{label}</MenuItem>
-                                    ))}
-                                </TextField>
+                                <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+                                    <Button
+                                        size="small"
+                                        startIcon={<AddIcon />}
+                                        disabled={!validLoop || status !== "stopped"}
+                                        onClick={() => setNoteTarget({ trackId: id })}
+                                    >
+                                        Add note
+                                    </Button>
+                                    <TextField
+                                        select
+                                        size="small"
+                                        label={`Instrument`}
+                                        value={instrument}
+                                        disabled={status !== "stopped"}
+                                        onChange={(event) => {
+                                            const value = event.target.value as Instrument;
+                                            setSelectedInstruments((current) => ({ ...current, [id]: value }));
+                                        }}
+                                        sx={{ minWidth: 170 }}
+                                    >
+                                        {Object.entries(instruments).map(([value, label]) => (
+                                            <MenuItem key={value} value={value}>{label}</MenuItem>
+                                        ))}
+                                    </TextField>
+                                </Stack>
                             </Stack>
 
                             <Box
@@ -245,34 +252,24 @@ export default function SoundTimeline({ tracks, loopSeconds }: SoundTimelineProp
                                     backgroundSize: secondWidth ? `${secondWidth}% 100%` : undefined,
                                 }}
                             >
-                                {notes.map(({ id, note, start, duration, lane }) => (
-                                    <Box
-                                        key={id}
-                                        title={`${note} · ${start} s start · ${duration} s duration`}
-                                        sx={{
-                                            position: "absolute",
-                                            // The horizontal position and width represent the note's time range.
-                                            left: `${start / loopSeconds * 100}%`,
-                                            width: `${duration / loopSeconds * 100}%`,
-                                            top: lane * 50 + 5,
-                                            height: 40,
-                                            borderRadius: 1,
-                                            bgcolor: "action.selected",
-                                            color: "text.primary",
-                                            ...noteColors[note.charAt(0).toUpperCase()],
-                                            boxShadow: "inset 0 0 0 1px rgba(0, 0, 0, 0.1)",
-                                            display: "grid",
-                                            placeItems: "center",
-                                            overflow: "hidden",
-                                            typography: "caption",
-                                            fontWeight: 600,
+                                {notes.map(({ id: blockId, note, start, duration, lane }) => (
+                                    <DraggableSoundBlock
+                                        key={blockId}
+                                        note={note}
+                                        start={start}
+                                        duration={duration}
+                                        lane={lane}
+                                        loopSeconds={loopSeconds}
+                                        disabled={status !== "stopped"}
+                                        onEdit={() => {
+                                            if (!playback.current) setNoteTarget({ trackId: id, blockId });
                                         }}
-                                    >
-                                        {note}
-                                    </Box>
+                                        onMove={(nextStart) => {
+                                            if (!playback.current) onBlockMove(id, blockId, nextStart, duration);
+                                        }}
+                                    />
                                 ))}
                                 <Box
-                                    aria-hidden="true"
                                     sx={{
                                         position: "absolute",
                                         insetBlock: -5,
@@ -288,6 +285,24 @@ export default function SoundTimeline({ tracks, loopSeconds }: SoundTimelineProp
                     );
                 })}
             </Stack>
+            {noteTarget && noteTrack && (
+                <NoteDialog
+                    key={noteTarget.blockId ?? noteTarget.trackId}
+                    trackName={noteTrack.name}
+                    initialNote={editedBlock?.note}
+                    onClose={() => setNoteTarget(null)}
+                    onSave={(note) => {
+                        if (!playback.current && validLoop) {
+                            if (editedBlock && editedBlock.note !== note) {
+                                onBlockNoteChange(noteTrack.id, editedBlock.id, note);
+                            } else if (noteTarget.blockId === undefined) {
+                                onBlockAdd(noteTrack.id, note);
+                            }
+                        }
+                        setNoteTarget(null);
+                    }}
+                />
+            )}
         </Stack>
     );
 }

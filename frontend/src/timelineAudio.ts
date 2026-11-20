@@ -20,6 +20,9 @@ export const instruments = {
     synthLead: "Synth lead",
     electricGuitar: "Electric guitar",
     kick: "Kick drum",
+    snare: "Snare drum",
+    hiHat: "Hi-hat",
+    tom: "Tom",
 } as const;
 
 export type Instrument = keyof typeof instruments;
@@ -38,7 +41,32 @@ const presets = {
     brass: { oscillator: { type: "sawtooth6" }, envelope: { attack: 0.035, decay: 0.15, sustain: 0.54, release: 0.09 } },
     synthLead: { oscillator: { type: "pulse", width: 0.35 }, envelope: { attack: 0.012, decay: 0.17, sustain: 0.59, release: 0.14 } },
     electricGuitar: { oscillator: { type: "fatsawtooth9", count: 3, spread: 18 }, envelope: { attack: 0.007, decay: 0.24, sustain: 0.36, release: 0.08 } },
-} satisfies Record<Exclude<Instrument, "kick">, NonNullable<ConstructorParameters<typeof Tone.Synth>[0]>>;
+} satisfies Record<Exclude<Instrument, "kick" | "snare" | "hiHat" | "tom">, NonNullable<ConstructorParameters<typeof Tone.Synth>[0]>>;
+
+function createVoice(instrument: Instrument) {
+    switch (instrument) {
+        case "kick":
+        case "tom":
+            return new Tone.MembraneSynth({
+                pitchDecay: instrument === "kick" ? 0.04 : 0.025,
+                octaves: instrument === "kick" ? 5 : 2,
+                envelope: { attack: 0.001, decay: 0.23, sustain: 0.02, release: 0.15 },
+            });
+        case "snare":
+            return new Tone.NoiseSynth({
+                noise: { type: "pink" },
+                envelope: { attack: 0.001, decay: 0.13, sustain: 0, release: 0.035 },
+            });
+        case "hiHat":
+            return new Tone.NoiseSynth({
+                volume: -9,
+                noise: { type: "white" },
+                envelope: { attack: 0.001, decay: 0.095, sustain: 0.08, release: 0.018 },
+            });
+        default:
+            return new Tone.Synth(presets[instrument]);
+    }
+}
 
 type AudioTrack = {
     instrument: Instrument;
@@ -54,7 +82,7 @@ export function createTimelineAudio(tracks: readonly AudioTrack[], loopSeconds: 
     let startedAt = 0;
     let stopped = false;
     // A voice pairs one block with its pitch and synth. The same voice is reused each loop.
-    const voices: { note: ScheduledNote; frequency: number; synth: Tone.Synth | Tone.MembraneSynth }[] = [];
+    const voices: { note: ScheduledNote; frequency: number; synth: ReturnType<typeof createVoice> }[] = [];
 
     return {
         async start() {
@@ -79,14 +107,7 @@ export function createTimelineAudio(tracks: readonly AudioTrack[], loopSeconds: 
                         throw new Error(`Invalid note: ${note.note}`);
                     }
 
-                    const synth = instrument === "kick"
-                        ? new Tone.MembraneSynth({
-                            pitchDecay: 0.04,
-                            octaves: 5,
-                            envelope: { attack: 0.001, decay: 0.23, sustain: 0.02, release: 0.15 },
-                        })
-                        : new Tone.Synth(presets[instrument]);
-                    synth.connect(gain);
+                    const synth = createVoice(instrument).connect(gain);
                     voices.push({ note, frequency, synth });
                 }
             }
@@ -96,7 +117,12 @@ export function createTimelineAudio(tracks: readonly AudioTrack[], loopSeconds: 
                 for (const { note, frequency, synth } of voices) {
                     // Use the exact audio timestamp plus the block offset. Tone schedules the release
                     // from that same start time using the block's duration.
-                    synth.triggerAttackRelease(frequency, note.duration, time + note.start);
+                    const noteStart = time + note.start;
+                    if (synth instanceof Tone.NoiseSynth) {
+                        synth.triggerAttackRelease(note.duration, noteStart);
+                    } else {
+                        synth.triggerAttackRelease(frequency, note.duration, noteStart);
+                    }
                 }
             // Use one tick per loop. For example, a four-second loop ticks at 0.25 Hz.
             }, 1 / loopSeconds);
