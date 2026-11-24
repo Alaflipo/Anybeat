@@ -11,6 +11,10 @@ The timeline representation of a single pitched note or drum hit with a start ti
 
 The timeline marker for the current position in the loop.
 
+**Seek**
+
+Moves the playhead to a chosen position for the next playback.
+
 **Pause**
 
 Halts playback and holds the playhead at its current position so playback can resume there.

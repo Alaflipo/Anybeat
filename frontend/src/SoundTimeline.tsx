@@ -4,6 +4,7 @@ import PauseIcon from "@mui/icons-material/Pause";
 import ReplayIcon from "@mui/icons-material/Replay";
 import { Alert, Autocomplete, Box, Button, IconButton, Stack, TextField, Typography } from "@mui/material";
 import { useEffect, useRef, useState } from "react";
+import type { KeyboardEvent, PointerEvent } from "react";
 import NoteDialog from "./NoteDialog";
 import DraggableSoundBlock from "./DraggableSoundBlock";
 import { createTimelineAudio } from "./timelineAudio";
@@ -11,6 +12,7 @@ import { instruments, midiNoteName, midiNoteNumber } from "./generalMidi";
 import type { Instrument } from "./generalMidi";
 
 const instrumentOptions = [...instruments.keys()];
+const playheadPosition = "var(--seek-preview, var(--seek-position, var(--playhead-position, 0%)))";
 
 // One note block. Start and duration are measured in seconds relative to the shared loop.
 // The note is written as a pitch such as C4.
@@ -80,7 +82,9 @@ export default function SoundTimeline({ tracks, loopSeconds, onBlockAdd, onBlock
     // The timeline element holds one CSS position inherited by all the playheads.
     const timeline = useRef<HTMLDivElement>(null);
     const playback = useRef<PlaybackSession | null>(null);
-    const [active, setActive] = useState<Pick<PlaybackSession, "trackId" | "status"> | null>(null);
+    const [active, setActive] = useState<Pick<PlaybackSession, "trackId" | "status" | "pausedAt"> | null>(null);
+    const [seekPosition, setSeekPosition] = useState<number | null>(null);
+    const seekDrag = useRef<{ pointerId: number; ruler: HTMLDivElement } | null>(null);
     // Keep each dropdown choice by track ID and fall back to the track's configured instrument.
     const [selectedInstruments, setSelectedInstruments] = useState<Partial<Record<string, Instrument>>>({});
     const [noteTarget, setNoteTarget] = useState<{ trackId: string; blockId?: string } | null>(null);
@@ -93,6 +97,9 @@ export default function SoundTimeline({ tracks, loopSeconds, onBlockAdd, onBlock
     const editingLocked = active !== null && active.status !== "paused";
 
     const validLoop = Number.isFinite(loopSeconds) && loopSeconds > 0;
+    const canSeek = validLoop && !editingLocked;
+    const visibleSeek = canSeek ? seekPosition : null;
+    const rulerPosition = visibleSeek ?? active?.pausedAt ?? 0;
     // Resolve each track's effective instrument and lay out its blocks before playback.
     const arrangedTracks = tracks.map((track) => ({
         ...track,
@@ -116,10 +123,16 @@ export default function SoundTimeline({ tracks, loopSeconds, onBlockAdd, onBlock
 
     function setPlaybackStatus(session: PlaybackSession, status: PlaybackStatus) {
         session.status = status;
-        setActive({ trackId: session.trackId, status });
+        setActive({ trackId: session.trackId, status, pausedAt: session.pausedAt });
     }
 
     function reset() {
+        clearSeekDrag();
+        setSeekPosition(null);
+        endPlayback();
+    }
+
+    function endPlayback() {
         playback.current?.dispose();
         playback.current = null;
         setActive(null);
@@ -127,12 +140,67 @@ export default function SoundTimeline({ tracks, loopSeconds, onBlockAdd, onBlock
 
     function reportPlaybackError(session: PlaybackSession, cause: unknown) {
         if (playback.current !== session) return;
-        reset();
+        endPlayback();
         setError(cause instanceof Error ? cause.message : "Could not change playback.");
     }
 
     function drawPlayhead(element: HTMLDivElement, position: number) {
         element.style.setProperty("--playhead-position", `${position / loopSeconds * 100}%`);
+    }
+
+    function clearSeekDrag() {
+        const drag = seekDrag.current;
+        if (!drag) return;
+
+        seekDrag.current = null;
+        timeline.current?.style.removeProperty("--seek-preview");
+        updateRulerValue(drag.ruler, rulerPosition);
+        if (drag.ruler.hasPointerCapture(drag.pointerId)) {
+            drag.ruler.releasePointerCapture(drag.pointerId);
+        }
+    }
+
+    function updateRulerValue(ruler: HTMLDivElement, position: number) {
+        ruler.setAttribute("aria-valuenow", String(position));
+        ruler.setAttribute("aria-valuetext", formatRulerValue(position));
+    }
+
+    function formatRulerValue(position: number) {
+        return `${Number(position.toFixed(3))} seconds`;
+    }
+
+    function previewSeek(event: PointerEvent<HTMLDivElement>) {
+        const position = positionAtPointer(event);
+        timeline.current?.style.setProperty("--seek-preview", `${position / loopSeconds * 100}%`);
+        updateRulerValue(event.currentTarget, position);
+    }
+
+    function cancelSeek(event: PointerEvent<HTMLDivElement>) {
+        if (seekDrag.current?.pointerId === event.pointerId) clearSeekDrag();
+    }
+
+    function positionAtPointer(event: PointerEvent<HTMLDivElement>) {
+        const { left, width } = event.currentTarget.getBoundingClientRect();
+        return clampSeek((event.clientX - left) / width * loopSeconds);
+    }
+
+    function clampSeek(position: number) {
+        return Math.min(loopSeconds, Math.max(0, position));
+    }
+
+    function seekWithKeyboard(event: KeyboardEvent<HTMLDivElement>) {
+        if (!canSeek || seekDrag.current) return;
+        const positions: Record<string, number> = {
+            ArrowLeft: rulerPosition - 0.125,
+            ArrowDown: rulerPosition - 0.125,
+            ArrowRight: rulerPosition + 0.125,
+            ArrowUp: rulerPosition + 0.125,
+            Home: 0,
+            End: loopSeconds,
+        };
+        if (!Object.hasOwn(positions, event.key)) return;
+        event.preventDefault();
+        setSeekPosition(clampSeek(positions[event.key]));
     }
 
     function animatePlayhead(session: PlaybackSession, element: HTMLDivElement) {
@@ -148,6 +216,7 @@ export default function SoundTimeline({ tracks, loopSeconds, onBlockAdd, onBlock
         try {
             await startAudio();
             if (playback.current !== session) return;
+            setSeekPosition(null);
             animatePlayhead(session, element);
             setPlaybackStatus(session, "playing");
         } catch (cause) {
@@ -186,7 +255,8 @@ export default function SoundTimeline({ tracks, loopSeconds, onBlockAdd, onBlock
                     const track = selectedTracks[index];
                     return id === track.id && blocks === track.blocks && instrument === track.instrument;
                 });
-            if (sameTracks) {
+            if (sameTracks && seekPosition === null) {
+                clearSeekDrag();
                 await beginPlayback(previous, element, previous.audio.resume);
                 return;
             }
@@ -194,7 +264,9 @@ export default function SoundTimeline({ tracks, loopSeconds, onBlockAdd, onBlock
 
         if (!selectedTracks.some(({ notes }) => notes.length > 0)) return;
 
-        const offset = previous?.trackId === trackId ? previous.pausedAt : 0;
+        clearSeekDrag();
+        const position = seekPosition ?? (previous?.trackId === trackId ? previous.pausedAt : 0);
+        const offset = position === loopSeconds ? 0 : position;
         previous?.dispose();
         const audio = createTimelineAudio(selectedTracks, loopSeconds, offset);
         const session: PlaybackSession = {
@@ -239,9 +311,47 @@ export default function SoundTimeline({ tracks, loopSeconds, onBlockAdd, onBlock
 
             {error && <Alert severity="error">{error}</Alert>}
 
-            <Stack ref={timeline} spacing={2}>
+            <Stack ref={timeline} spacing={2} sx={visibleSeek === null ? undefined : {
+                "--seek-position": `${visibleSeek / loopSeconds * 100}%`,
+            }}>
                 {/* The ruler uses the same one-pixel inset as the bordered tracks. */}
-                <Box sx={{ position: "relative", height: 20, mx: "1px" }}>
+                <Box
+                    role={canSeek ? "slider" : undefined}
+                    aria-label={canSeek ? "Playhead" : undefined}
+                    aria-valuemin={canSeek ? 0 : undefined}
+                    aria-valuemax={canSeek ? loopSeconds : undefined}
+                    aria-valuenow={canSeek ? rulerPosition : undefined}
+                    aria-valuetext={canSeek ? formatRulerValue(rulerPosition) : undefined}
+                    tabIndex={canSeek ? 0 : -1}
+                    onKeyDown={seekWithKeyboard}
+                    onPointerDown={(event) => {
+                        if (!canSeek || event.button !== 0 || seekDrag.current ||
+                            event.currentTarget.getBoundingClientRect().width === 0) return;
+                        event.currentTarget.setPointerCapture(event.pointerId);
+                        seekDrag.current = { pointerId: event.pointerId, ruler: event.currentTarget };
+                        previewSeek(event);
+                    }}
+                    onPointerMove={(event) => {
+                        if (canSeek && seekDrag.current?.pointerId === event.pointerId) {
+                            previewSeek(event);
+                        }
+                    }}
+                    onPointerUp={(event) => {
+                        if (seekDrag.current?.pointerId !== event.pointerId) return;
+                        if (canSeek) setSeekPosition(positionAtPointer(event));
+                        clearSeekDrag();
+                    }}
+                    onPointerCancel={cancelSeek}
+                    onLostPointerCapture={cancelSeek}
+                    sx={{
+                        position: "relative",
+                        height: 32,
+                        mx: "1px",
+                        cursor: canSeek ? "ew-resize" : "default",
+                        touchAction: canSeek ? "none" : "auto",
+                        userSelect: "none",
+                    }}
+                >
                     {ticks.map((second) => (
                         <Typography
                             key={second}
@@ -258,6 +368,17 @@ export default function SoundTimeline({ tracks, loopSeconds, onBlockAdd, onBlock
                             {second} s
                         </Typography>
                     ))}
+                    {validLoop && <Box sx={{
+                        position: "absolute",
+                        left: playheadPosition,
+                        bottom: 0,
+                        width: 12,
+                        height: 12,
+                        transform: "translateX(-50%)",
+                        clipPath: "polygon(0 0, 100% 0, 50% 100%)",
+                        bgcolor: "error.main",
+                        pointerEvents: canSeek ? "auto" : "none",
+                    }} />}
                 </Box>
 
                 {arrangedTracks.map(({ id, name, instrument, notes, laneCount }) => {
@@ -355,7 +476,8 @@ export default function SoundTimeline({ tracks, loopSeconds, onBlockAdd, onBlock
                                         position: "absolute",
                                         insetBlock: -5,
                                         // During solo playback, the other tracks stay at the start.
-                                        left: followsPlayhead ? "var(--playhead-position, 0%)" : 0,
+                                        left: followsPlayhead || visibleSeek !== null
+                                            ? playheadPosition : "var(--seek-preview, 0%)",
                                         width: 2,
                                         bgcolor: "error.main",
                                         pointerEvents: "none",
