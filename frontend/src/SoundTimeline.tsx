@@ -115,7 +115,7 @@ export default function SoundTimeline({
         : [];
     const canPlay = validLoop && arrangedTracks.some(({ notes }) => notes.length > 0);
 
-    // App remounts the timeline when the selected arrangement changes.
+    // App remounts the timeline when the selected song changes.
     useEffect(() => () => {
         playback.current?.dispose();
         playback.current = null;

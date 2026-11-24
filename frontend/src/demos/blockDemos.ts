@@ -1,5 +1,5 @@
 import type { SoundTrack } from "../SoundTimeline";
-import type { Arrangement } from "../arrangement";
+import type { Song } from "../song";
 
 const originalTracks: SoundTrack[] = [
     {
@@ -41,7 +41,7 @@ const originalTracks: SoundTrack[] = [
     },
 ];
 
-export const original: Arrangement = {
+export const original: Song = {
     name: "Original",
     loopSeconds: 6.5,
     tracks: originalTracks,
