@@ -270,7 +270,7 @@ export default function SoundTimeline({ tracks, loopSeconds, onBlockAdd, onBlock
                                         label={instrument === "drum-kit"
                                             ? instruments.get(`drum:${midiNoteNumber(note)}`)
                                             : drumKey === null ? undefined : instruments.get(instrument)}
-                                        showLabel={drumKey === null && instrument !== "drum-kit"}
+                                        showLabel={drumKey === null}
                                         start={start}
                                         duration={duration}
                                         lane={lane}
