@@ -11,6 +11,8 @@ services:
 
   frontend:
     build: ./frontend
+    environment:
+      ANYBEAT_API_TARGET: http://backend:8000
     ports:
       - "127.0.0.1:5173:5173"
     volumes:
