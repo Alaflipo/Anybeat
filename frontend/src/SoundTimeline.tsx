@@ -35,6 +35,7 @@ export type SoundTrack = {
 type SoundTimelineProps = {
     tracks: readonly SoundTrack[];
     loopSeconds: number;
+    onTrackAdd: () => void;
     onInstrumentChange: (trackId: string, instrument: Instrument) => void;
     onBlockAdd: (trackId: string, note: string) => void;
     onBlockNoteChange: (trackId: string, blockId: string, note: string) => void;
@@ -80,7 +81,7 @@ function layoutBlocks(blocks: readonly SoundBlock[], loopSeconds: number) {
 }
 
 export default function SoundTimeline({
-    tracks, loopSeconds, onInstrumentChange, onBlockAdd, onBlockNoteChange, onBlockTimingChange,
+    tracks, loopSeconds, onTrackAdd, onInstrumentChange, onBlockAdd, onBlockNoteChange, onBlockTimingChange,
 }: SoundTimelineProps) {
     // The timeline element holds one CSS position inherited by all the playheads.
     const timeline = useRef<HTMLDivElement>(null);
@@ -487,6 +488,16 @@ export default function SoundTimeline({
                     );
                 })}
             </Stack>
+            <Button
+                startIcon={<AddIcon />}
+                disabled={editingLocked}
+                onClick={() => {
+                    if (canEdit()) onTrackAdd();
+                }}
+                sx={{ alignSelf: "flex-start" }}
+            >
+                Add track
+            </Button>
             {noteTarget && noteTrack && (
                 <NoteDialog
                     key={noteTarget.blockId ?? noteTarget.trackId}

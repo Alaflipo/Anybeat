@@ -6,6 +6,16 @@ import { demos } from "./demoTracks";
 import type { Demo } from "./demos/demoData";
 import { importMidi } from "./importMidi";
 
+function createPianoTrack(tracks: readonly SoundTrack[]): SoundTrack {
+    const names = new Set(tracks.map(({ name }) => name));
+    const ids = new Set(tracks.map(({ id }) => id));
+    let nameNumber = 1;
+    while (names.has(`Track ${nameNumber}`)) nameNumber++;
+    let idNumber = nameNumber;
+    while (ids.has(`track-${idNumber}`)) idNumber++;
+    return { id: `track-${idNumber}`, name: `Track ${nameNumber}`, instrument: "program:0", blocks: [] };
+}
+
 export default function App() {
     const [{ arrangements, selectedIndex }, setCatalog] = useState({ arrangements: demos, selectedIndex: 0 });
     const [editedTracks, setEditedTracks] = useState<Partial<Record<number, readonly SoundTrack[]>>>({});
@@ -26,7 +36,7 @@ export default function App() {
         appendArrangement({
             name: `Untitled arrangement ${nextUntitled.current++}`,
             loopSeconds: 8,
-            tracks: [{ id: "track-1", name: "Track 1", instrument: "program:0", blocks: [] }],
+            tracks: [createPianoTrack([])],
         });
     }
 
@@ -39,12 +49,19 @@ export default function App() {
         }
     }
 
-    function editTrack(trackId: string, edit: (track: SoundTrack) => SoundTrack) {
+    function editTracks(edit: (tracks: readonly SoundTrack[]) => readonly SoundTrack[]) {
         setEditedTracks((current) => ({
             ...current,
-            [selectedIndex]: (current[selectedIndex] ?? arrangement.tracks).map((track) =>
-                track.id === trackId ? edit(track) : track),
+            [selectedIndex]: edit(current[selectedIndex] ?? arrangement.tracks),
         }));
+    }
+
+    function addTrack() {
+        editTracks((tracks) => [...tracks, createPianoTrack(tracks)]);
+    }
+
+    function editTrack(trackId: string, edit: (track: SoundTrack) => SoundTrack) {
+        editTracks((tracks) => tracks.map((track) => track.id === trackId ? edit(track) : track));
     }
 
     function editTrackBlocks(trackId: string, edit: (blocks: readonly SoundBlock[]) => readonly SoundBlock[]) {
@@ -118,6 +135,7 @@ export default function App() {
                     key={selectedIndex}
                     tracks={editedTracks[selectedIndex] ?? arrangement.tracks}
                     loopSeconds={arrangement.loopSeconds}
+                    onTrackAdd={addTrack}
                     onInstrumentChange={changeInstrument}
                     onBlockAdd={addBlock}
                     onBlockNoteChange={changeBlockNote}
