@@ -10,6 +10,7 @@ type AudioTrack = {
 
 type NoteEvent = {
     seconds: number;
+    noteStart: number;
     channel: number;
     key: number;
     velocity: number;
@@ -33,12 +34,24 @@ function loadSoundBank() {
     return soundBank;
 }
 
-export function createTimelineAudio(tracks: readonly AudioTrack[], loopSeconds: number) {
+export function createTimelineAudio(tracks: readonly AudioTrack[], loopSeconds: number, offsetSeconds = 0) {
     let synth: WorkletSynthesizer | undefined;
     let mixBus: DynamicsCompressorNode | undefined;
     let timer: number | undefined;
+    let scheduleNotes: (() => void) | undefined;
     let startedAt = 0;
     let stopped = false;
+
+    function stopScheduling() {
+        window.clearInterval(timer);
+        timer = undefined;
+    }
+
+    function startScheduling() {
+        if (stopped || !scheduleNotes) return;
+        scheduleNotes();
+        timer = window.setInterval(scheduleNotes, 30);
+    }
 
     return {
         async start() {
@@ -80,8 +93,8 @@ export function createTimelineAudio(tracks: readonly AudioTrack[], loopSeconds: 
                 for (const note of notes) {
                     const key = instrument.startsWith("drum:")
                         ? Number(instrument.slice("drum:".length)) : midiNoteNumber(note.note);
-                    events.push({ seconds: note.start, channel, key, velocity: note.velocity ?? 88 });
-                    events.push({ seconds: note.start + note.duration, channel, key, velocity: 0 });
+                    events.push({ seconds: note.start, noteStart: note.start, channel, key, velocity: note.velocity ?? 88 });
+                    events.push({ seconds: note.start + note.duration, noteStart: note.start, channel, key, velocity: 0 });
                 }
             }
 
@@ -99,7 +112,7 @@ export function createTimelineAudio(tracks: readonly AudioTrack[], loopSeconds: 
 
             let index = 0;
             let cycle = 0;
-            startedAt = audio.currentTime + 0.15;
+            startedAt = audio.currentTime + 0.15 - offsetSeconds;
 
             function schedule() {
                 const horizon = audio.currentTime + 0.2;
@@ -109,10 +122,13 @@ export function createTimelineAudio(tracks: readonly AudioTrack[], loopSeconds: 
                     const time = startedAt + cycle * loopSeconds + event.seconds;
                     if (time > horizon) break;
 
-                    if (event.velocity === 0) {
-                        player.noteOff(event.channel, event.key, { time });
-                    } else {
-                        player.noteOn(event.channel, event.key, event.velocity, { time });
+                    // Skip both events for notes already in progress at an edited resume.
+                    if (cycle !== 0 || event.noteStart >= offsetSeconds) {
+                        if (event.velocity === 0) {
+                            player.noteOff(event.channel, event.key, { time });
+                        } else {
+                            player.noteOn(event.channel, event.key, event.velocity, { time });
+                        }
                     }
                     if (++index === events.length) {
                         index = 0;
@@ -120,17 +136,28 @@ export function createTimelineAudio(tracks: readonly AudioTrack[], loopSeconds: 
                     }
                 }
             }
-            schedule();
-            timer = window.setInterval(schedule, 30);
+            scheduleNotes = schedule;
+            startScheduling();
         },
 
         elapsedSeconds() {
-            return Math.max(0, (context?.currentTime ?? 0) - startedAt);
+            return Math.max(offsetSeconds, (context?.currentTime ?? 0) - startedAt);
+        },
+
+        async pause() {
+            await context?.suspend();
+            stopScheduling();
+        },
+
+        async resume() {
+            await context?.resume();
+            startScheduling();
         },
 
         stop() {
             stopped = true;
-            if (timer !== undefined) window.clearInterval(timer);
+            stopScheduling();
+            scheduleNotes = undefined;
             synth?.destroy();
             synth = undefined;
             mixBus?.disconnect();

@@ -1,6 +1,7 @@
 import AddIcon from "@mui/icons-material/Add";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
-import StopIcon from "@mui/icons-material/Stop";
+import PauseIcon from "@mui/icons-material/Pause";
+import ReplayIcon from "@mui/icons-material/Replay";
 import { Alert, Autocomplete, Box, Button, IconButton, Stack, TextField, Typography } from "@mui/material";
 import { useEffect, useRef, useState } from "react";
 import NoteDialog from "./NoteDialog";
@@ -37,6 +38,18 @@ type SoundTimelineProps = {
     onBlockTimingChange: (trackId: string, blockId: string, start: number, duration: number) => void;
 };
 
+type PlaybackStatus = "starting" | "playing" | "pausing" | "paused";
+
+type PlaybackSession = {
+    trackId: string | null;
+    status: PlaybackStatus;
+    tracks: readonly SoundTrack[];
+    audio: ReturnType<typeof createTimelineAudio>;
+    frame: number;
+    pausedAt: number;
+    dispose: () => void;
+};
+
 // Prepare the same note timings for the track display and the audio scheduler.
 function layoutBlocks(blocks: readonly SoundBlock[], loopSeconds: number) {
     // Each entry is the time when a lane becomes available again.
@@ -66,14 +79,8 @@ function layoutBlocks(blocks: readonly SoundBlock[], loopSeconds: number) {
 export default function SoundTimeline({ tracks, loopSeconds, onBlockAdd, onBlockNoteChange, onBlockTimingChange }: SoundTimelineProps) {
     // The timeline element holds one CSS position inherited by all the playheads.
     const timeline = useRef<HTMLDivElement>(null);
-    // The ref holds the current session's cleanup function, including during async startup.
-    // Its identity lets us tell whether a Play request still owns the session.
-    const playback = useRef<(() => void) | null>(null);
-    // React state drives the button and instrument controls during startup and playback.
-    const [active, setActive] = useState<(Pick<SoundTimelineProps, "tracks" | "loopSeconds"> & {
-        status: "starting" | "playing";
-        trackId: string | null;
-    }) | null>(null);
+    const playback = useRef<PlaybackSession | null>(null);
+    const [active, setActive] = useState<Pick<PlaybackSession, "trackId" | "status"> | null>(null);
     // Keep each dropdown choice by track ID and fall back to the track's configured instrument.
     const [selectedInstruments, setSelectedInstruments] = useState<Partial<Record<string, Instrument>>>({});
     const [noteTarget, setNoteTarget] = useState<{ trackId: string; blockId?: string } | null>(null);
@@ -82,10 +89,8 @@ export default function SoundTimeline({ tracks, loopSeconds, onBlockAdd, onBlock
         (selectedInstruments[noteTrack.id] ?? noteTrack.instrument) === "drum-kit";
     const editedBlock = noteTrack?.blocks.find(({ id }) => id === noteTarget?.blockId);
     const [error, setError] = useState("");
-    // Show the playback status only for the inputs that started that session.
-    const currentSession = active?.tracks === tracks && active.loopSeconds === loopSeconds ? active : null;
-    const status = currentSession?.status ?? "stopped";
-    const mixStatus = currentSession?.trackId === null ? currentSession.status : "stopped";
+    const mixStatus = active?.trackId === null ? active.status : "stopped";
+    const editingLocked = active !== null && active.status !== "paused";
 
     const validLoop = Number.isFinite(loopSeconds) && loopSeconds > 0;
     // Resolve each track's effective instrument and lay out its blocks before playback.
@@ -103,61 +108,116 @@ export default function SoundTimeline({ tracks, loopSeconds, onBlockAdd, onBlock
         : [];
     const canPlay = validLoop && arrangedTracks.some(({ notes }) => notes.length > 0);
 
-    // Dispose of playback when the track list or loop length changes, or when the timeline unmounts.
+    // App remounts the timeline when the selected arrangement changes.
     useEffect(() => () => {
-        playback.current?.();
+        playback.current?.dispose();
         playback.current = null;
-    }, [tracks, loopSeconds]);
+    }, []);
 
-    async function play(trackId: string | null) {
-        const element = timeline.current;
-        const selectedTracks = trackId === null
-            ? arrangedTracks
-            : arrangedTracks.filter(({ id }) => id === trackId);
-        if (!element || !validLoop || !selectedTracks.some(({ notes }) => notes.length > 0)) return;
+    function setPlaybackStatus(session: PlaybackSession, status: PlaybackStatus) {
+        session.status = status;
+        setActive({ trackId: session.trackId, status });
+    }
 
-        // Replace the current session so a solo track never plays over the mix.
-        playback.current?.();
-        const audio = createTimelineAudio(selectedTracks, loopSeconds);
-        let frame = 0;
-        const dispose = () => {
-            cancelAnimationFrame(frame);
-            audio.stop();
-            element.style.removeProperty("--playhead-position");
-        };
-        // Register cleanup before awaiting startup so an input change can cancel this attempt.
-        playback.current = dispose;
-        setError("");
-        setActive({ tracks, loopSeconds, trackId, status: "starting" });
+    function reset() {
+        playback.current?.dispose();
+        playback.current = null;
+        setActive(null);
+    }
 
+    function reportPlaybackError(session: PlaybackSession, cause: unknown) {
+        if (playback.current !== session) return;
+        reset();
+        setError(cause instanceof Error ? cause.message : "Could not change playback.");
+    }
+
+    function drawPlayhead(element: HTMLDivElement, position: number) {
+        element.style.setProperty("--playhead-position", `${position / loopSeconds * 100}%`);
+    }
+
+    function animatePlayhead(session: PlaybackSession, element: HTMLDivElement) {
+        function draw() {
+            drawPlayhead(element, session.audio.elapsedSeconds() % loopSeconds);
+            session.frame = requestAnimationFrame(draw);
+        }
+        draw();
+    }
+
+    async function beginPlayback(session: PlaybackSession, element: HTMLDivElement, startAudio: () => Promise<void>) {
+        setPlaybackStatus(session, "starting");
         try {
-            // Start audio from the Play gesture and check that this session is still current afterward.
-            await audio.start();
-            if (playback.current !== dispose) return;
-
-            // The tracks in this session share one animation frame.
-            const drawPlayhead = () => {
-                // Use audio time as the source of truth. Modulo wraps the position back to zero each loop.
-                const progress = (audio.elapsedSeconds() % loopSeconds) / loopSeconds;
-                element.style.setProperty("--playhead-position", `${progress * 100}%`);
-                frame = requestAnimationFrame(drawPlayhead);
-            };
-
-            frame = requestAnimationFrame(drawPlayhead);
-            setActive({ tracks, loopSeconds, trackId, status: "playing" });
+            await startAudio();
+            if (playback.current !== session) return;
+            animatePlayhead(session, element);
+            setPlaybackStatus(session, "playing");
         } catch (cause) {
-            // A cancelled startup can also reject. Leave any replacement session alone.
-            if (playback.current !== dispose) return;
-            stop();
-            setError(cause instanceof Error ? cause.message : "Could not start audio.");
+            reportPlaybackError(session, cause);
         }
     }
 
-    // Reset the active session and controls so the next Play starts from the beginning.
-    function stop() {
-        playback.current?.();
-        playback.current = null;
-        setActive(null);
+    async function togglePlayback(trackId: string | null) {
+        const element = timeline.current;
+        if (!element || !validLoop) return;
+
+        const selectedTracks = trackId === null
+            ? arrangedTracks
+            : arrangedTracks.filter(({ id }) => id === trackId);
+        const previous = playback.current;
+        if (previous && previous.trackId === trackId) {
+            if (previous.status === "starting" || previous.status === "pausing") return;
+
+            if (previous.status === "playing") {
+                setPlaybackStatus(previous, "pausing");
+                try {
+                    await previous.audio.pause();
+                    if (playback.current !== previous) return;
+                    cancelAnimationFrame(previous.frame);
+                    previous.pausedAt = previous.audio.elapsedSeconds() % loopSeconds;
+                    drawPlayhead(element, previous.pausedAt);
+                    setPlaybackStatus(previous, "paused");
+                } catch (cause) {
+                    reportPlaybackError(previous, cause);
+                }
+                return;
+            }
+
+            const sameTracks = previous.tracks.length === selectedTracks.length &&
+                previous.tracks.every(({ id, blocks, instrument }, index) => {
+                    const track = selectedTracks[index];
+                    return id === track.id && blocks === track.blocks && instrument === track.instrument;
+                });
+            if (sameTracks) {
+                await beginPlayback(previous, element, previous.audio.resume);
+                return;
+            }
+        }
+
+        if (!selectedTracks.some(({ notes }) => notes.length > 0)) return;
+
+        const offset = previous?.trackId === trackId ? previous.pausedAt : 0;
+        previous?.dispose();
+        const audio = createTimelineAudio(selectedTracks, loopSeconds, offset);
+        const session: PlaybackSession = {
+            trackId,
+            status: "starting",
+            tracks: selectedTracks,
+            audio,
+            frame: 0,
+            pausedAt: offset,
+            dispose() {
+                cancelAnimationFrame(session.frame);
+                audio.stop();
+                element.style.removeProperty("--playhead-position");
+            },
+        };
+        playback.current = session;
+        setError("");
+        drawPlayhead(element, offset);
+        await beginPlayback(session, element, audio.start);
+    }
+
+    function canEdit() {
+        return playback.current === null || playback.current.status === "paused";
     }
 
     return (
@@ -165,12 +225,13 @@ export default function SoundTimeline({ tracks, loopSeconds, onBlockAdd, onBlock
             <Stack direction="row" spacing={2} sx={{ alignItems: "center" }}>
                 <Button
                     variant="contained"
-                    startIcon={mixStatus === "playing" ? <StopIcon /> : <PlayArrowIcon />}
-                    disabled={!canPlay || mixStatus === "starting"}
-                    onClick={mixStatus === "playing" ? stop : () => void play(null)}
+                    startIcon={mixStatus === "playing" || mixStatus === "pausing" ? <PauseIcon /> : <PlayArrowIcon />}
+                    disabled={!canPlay || mixStatus === "starting" || mixStatus === "pausing"}
+                    onClick={() => void togglePlayback(null)}
                 >
-                    {mixStatus === "playing" ? "Stop" : mixStatus === "starting" ? "Starting…" : "Play all tracks"}
+                    {mixStatus === "playing" || mixStatus === "pausing" ? "Pause all tracks" : mixStatus === "starting" ? "Starting…" : "Play all tracks"}
                 </Button>
+                {mixStatus !== "stopped" && <Button startIcon={<ReplayIcon />} onClick={reset}>Reset</Button>}
                 <Typography variant="body2" color="text.secondary">
                     {loopSeconds} s loop
                 </Typography>
@@ -201,9 +262,9 @@ export default function SoundTimeline({ tracks, loopSeconds, onBlockAdd, onBlock
 
                 {arrangedTracks.map(({ id, name, instrument, notes, laneCount }) => {
                     const drumKey = instrument.startsWith("drum:") ? Number(instrument.slice("drum:".length)) : null;
-                    const soloStatus = currentSession?.trackId === id ? currentSession.status : "stopped";
-                    const followsPlayhead = currentSession !== null &&
-                        (currentSession.trackId === null || currentSession.trackId === id);
+                    const soloStatus = active?.trackId === id ? active.status : "stopped";
+                    const soloPlaying = soloStatus === "playing" || soloStatus === "pausing";
+                    const followsPlayhead = active !== null && (active.trackId === null || active.trackId === id);
 
                     return (
                         <Stack component="section" key={id} spacing={1}>
@@ -211,21 +272,26 @@ export default function SoundTimeline({ tracks, loopSeconds, onBlockAdd, onBlock
                                 <Stack direction="row" spacing={1} sx={{ alignItems: "center", flexWrap: "wrap" }}>
                                     <IconButton
                                         size="small"
-                                        title={soloStatus === "playing" ? `Stop ${name}` : `Play ${name}`}
-                                        disabled={!notes.length || soloStatus === "starting"}
-                                        onClick={soloStatus === "playing" ? stop : () => void play(id)}
+                                        title={soloPlaying ? `Pause ${name}` : `Play ${name}`}
+                                        disabled={!notes.length || soloStatus === "starting" || soloStatus === "pausing"}
+                                        onClick={() => void togglePlayback(id)}
                                     >
-                                        {soloStatus === "playing" ? <StopIcon /> : <PlayArrowIcon />}
+                                        {soloPlaying ? <PauseIcon /> : <PlayArrowIcon />}
                                     </IconButton>
+                                    {soloStatus !== "stopped" && (
+                                        <IconButton size="small" title={`Reset ${name}`} onClick={reset}>
+                                            <ReplayIcon />
+                                        </IconButton>
+                                    )}
                                     <Typography component="h3" variant="subtitle1">{name}</Typography>
                                 </Stack>
                                 <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
                                     <Button
                                         size="small"
                                         startIcon={<AddIcon />}
-                                        disabled={!validLoop || status !== "stopped"}
+                                        disabled={!validLoop || editingLocked}
                                         onClick={() => {
-                                            if (playback.current) return;
+                                            if (!canEdit()) return;
                                             if (drumKey === null) setNoteTarget({ trackId: id });
                                             else onBlockAdd(id, midiNoteName(drumKey));
                                         }}
@@ -239,7 +305,7 @@ export default function SoundTimeline({ tracks, loopSeconds, onBlockAdd, onBlock
                                         renderInput={(params) => <TextField {...params} label="Instrument" />}
                                         value={instrument}
                                         disableClearable
-                                        disabled={status !== "stopped"}
+                                        disabled={editingLocked}
                                         onChange={(_, value) => {
                                             setSelectedInstruments((current) => ({ ...current, [id]: value }));
                                         }}
@@ -275,12 +341,12 @@ export default function SoundTimeline({ tracks, loopSeconds, onBlockAdd, onBlock
                                         duration={duration}
                                         lane={lane}
                                         loopSeconds={loopSeconds}
-                                        disabled={status !== "stopped"}
+                                        disabled={editingLocked}
                                         onEdit={drumKey === null ? () => {
-                                            if (!playback.current) setNoteTarget({ trackId: id, blockId });
+                                            if (canEdit()) setNoteTarget({ trackId: id, blockId });
                                         } : undefined}
                                         onTimingChange={(nextStart, nextDuration) => {
-                                            if (!playback.current) onBlockTimingChange(id, blockId, nextStart, nextDuration);
+                                            if (canEdit()) onBlockTimingChange(id, blockId, nextStart, nextDuration);
                                         }}
                                     />
                                 ))}
@@ -308,7 +374,7 @@ export default function SoundTimeline({ tracks, loopSeconds, onBlockAdd, onBlock
                     isDrumKit={isEditingDrumKit}
                     onClose={() => setNoteTarget(null)}
                     onSave={(note) => {
-                        if (!playback.current && validLoop) {
+                        if (canEdit() && validLoop) {
                             if (editedBlock && editedBlock.note !== note) {
                                 onBlockNoteChange(noteTrack.id, editedBlock.id, note);
                             } else if (noteTarget.blockId === undefined) {
