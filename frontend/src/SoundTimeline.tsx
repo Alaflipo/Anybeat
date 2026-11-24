@@ -1,12 +1,15 @@
 import AddIcon from "@mui/icons-material/Add";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import StopIcon from "@mui/icons-material/Stop";
-import { Alert, Box, Button, IconButton, MenuItem, Stack, TextField, Typography } from "@mui/material";
+import { Alert, Autocomplete, Box, Button, IconButton, Stack, TextField, Typography } from "@mui/material";
 import { useEffect, useRef, useState } from "react";
 import NoteDialog from "./NoteDialog";
 import DraggableSoundBlock from "./DraggableSoundBlock";
-import { createTimelineAudio, instruments } from "./timelineAudio";
-import type { Instrument } from "./timelineAudio";
+import { createTimelineAudio } from "./timelineAudio";
+import { instruments, midiNoteName, midiNoteNumber } from "./generalMidi";
+import type { Instrument } from "./generalMidi";
+
+const instrumentOptions = [...instruments.keys()];
 
 // One note block. Start and duration are measured in seconds relative to the shared loop.
 // The note is written as a pitch such as C4.
@@ -15,6 +18,7 @@ export type SoundBlock = {
     start: number;
     duration: number;
     note: string;
+    velocity?: number;
 };
 
 // A track groups blocks that share one instrument. The ID also identifies its instrument selection.
@@ -74,6 +78,8 @@ export default function SoundTimeline({ tracks, loopSeconds, onBlockAdd, onBlock
     const [selectedInstruments, setSelectedInstruments] = useState<Partial<Record<string, Instrument>>>({});
     const [noteTarget, setNoteTarget] = useState<{ trackId: string; blockId?: string } | null>(null);
     const noteTrack = tracks.find(({ id }) => id === noteTarget?.trackId);
+    const isEditingDrumKit = noteTrack !== undefined &&
+        (selectedInstruments[noteTrack.id] ?? noteTrack.instrument) === "drum-kit";
     const editedBlock = noteTrack?.blocks.find(({ id }) => id === noteTarget?.blockId);
     const [error, setError] = useState("");
     // Show the playback status only for the inputs that started that session.
@@ -90,8 +96,11 @@ export default function SoundTimeline({ tracks, loopSeconds, onBlockAdd, onBlock
     }));
     // One second is this percentage of the track width. The ruler and grid share that scale.
     const secondWidth = validLoop && loopSeconds >= 1 ? 100 / loopSeconds : 0;
-    // Label zero and each whole second. A fractional end has a shorter final grid interval.
-    const ticks = validLoop ? Array.from({ length: Math.floor(loopSeconds) + 1 }, (_, second) => second) : [];
+    // Space the grid farther apart for longer imported songs so the labels stay readable.
+    const tickStep = validLoop ? Math.max(1, Math.ceil(loopSeconds / 16)) : 1;
+    const ticks = validLoop
+        ? Array.from({ length: Math.floor(loopSeconds / tickStep) + 1 }, (_, index) => index * tickStep)
+        : [];
     const canPlay = validLoop && arrangedTracks.some(({ notes }) => notes.length > 0);
 
     // Dispose of playback when the track list or loop length changes, or when the timeline unmounts.
@@ -191,6 +200,7 @@ export default function SoundTimeline({ tracks, loopSeconds, onBlockAdd, onBlock
                 </Box>
 
                 {arrangedTracks.map(({ id, name, instrument, notes, laneCount }) => {
+                    const drumKey = instrument.startsWith("drum:") ? Number(instrument.slice("drum:".length)) : null;
                     const soloStatus = currentSession?.trackId === id ? currentSession.status : "stopped";
                     const followsPlayhead = currentSession !== null &&
                         (currentSession.trackId === null || currentSession.trackId === id);
@@ -214,26 +224,27 @@ export default function SoundTimeline({ tracks, loopSeconds, onBlockAdd, onBlock
                                         size="small"
                                         startIcon={<AddIcon />}
                                         disabled={!validLoop || status !== "stopped"}
-                                        onClick={() => setNoteTarget({ trackId: id })}
+                                        onClick={() => {
+                                            if (playback.current) return;
+                                            if (drumKey === null) setNoteTarget({ trackId: id });
+                                            else onBlockAdd(id, midiNoteName(drumKey));
+                                        }}
                                     >
-                                        Add note
+                                        {drumKey === null ? "Add note" : "Add hit"}
                                     </Button>
-                                    <TextField
-                                        select
+                                    <Autocomplete
                                         size="small"
-                                        label={`Instrument`}
+                                        options={instrumentOptions}
+                                        getOptionLabel={(option) => instruments.get(option) ?? option}
+                                        renderInput={(params) => <TextField {...params} label="Instrument" />}
                                         value={instrument}
+                                        disableClearable
                                         disabled={status !== "stopped"}
-                                        onChange={(event) => {
-                                            const value = event.target.value as Instrument;
+                                        onChange={(_, value) => {
                                             setSelectedInstruments((current) => ({ ...current, [id]: value }));
                                         }}
-                                        sx={{ minWidth: 170 }}
-                                    >
-                                        {Object.entries(instruments).map(([value, label]) => (
-                                            <MenuItem key={value} value={value}>{label}</MenuItem>
-                                        ))}
-                                    </TextField>
+                                        sx={{ width: { xs: 170, sm: 245 } }}
+                                    />
                                 </Stack>
                             </Stack>
 
@@ -245,25 +256,28 @@ export default function SoundTimeline({ tracks, loopSeconds, onBlockAdd, onBlock
                                     border: 1,
                                     borderColor: "divider",
                                     borderRadius: 1,
-                                    // Repeat a thin line at the end of each one-second tile.
+                                    // Repeat a thin line at each labeled interval.
                                     backgroundImage: secondWidth
                                         ? "linear-gradient(to left, rgba(127,127,127,0.2) 1px, transparent 1px)"
                                         : undefined,
-                                    backgroundSize: secondWidth ? `${secondWidth}% 100%` : undefined,
+                                    backgroundSize: secondWidth ? `${secondWidth * tickStep}% 100%` : undefined,
                                 }}
                             >
                                 {notes.map(({ id: blockId, note, start, duration, lane }) => (
                                     <DraggableSoundBlock
                                         key={blockId}
                                         note={note}
+                                        label={instrument === "drum-kit"
+                                            ? instruments.get(`drum:${midiNoteNumber(note)}`)
+                                            : drumKey === null ? undefined : instruments.get(instrument)}
                                         start={start}
                                         duration={duration}
                                         lane={lane}
                                         loopSeconds={loopSeconds}
                                         disabled={status !== "stopped"}
-                                        onEdit={() => {
+                                        onEdit={drumKey === null ? () => {
                                             if (!playback.current) setNoteTarget({ trackId: id, blockId });
-                                        }}
+                                        } : undefined}
                                         onMove={(nextStart) => {
                                             if (!playback.current) onBlockMove(id, blockId, nextStart, duration);
                                         }}
@@ -290,6 +304,7 @@ export default function SoundTimeline({ tracks, loopSeconds, onBlockAdd, onBlock
                     key={noteTarget.blockId ?? noteTarget.trackId}
                     trackName={noteTrack.name}
                     initialNote={editedBlock?.note}
+                    isDrumKit={isEditingDrumKit}
                     onClose={() => setNoteTarget(null)}
                     onSave={(note) => {
                         if (!playback.current && validLoop) {

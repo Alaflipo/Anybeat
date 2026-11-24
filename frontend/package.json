@@ -14,9 +14,10 @@
     "@emotion/styled": "^11.14.1",
     "@mui/icons-material": "^9.5.0",
     "@mui/material": "^9.5.0",
+    "midi-file": "^1.2.4",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
-    "tone": "^15.1.22"
+    "spessasynth_lib": "^4.4.9"
   },
   "devDependencies": {
     "@types/node": "^24.19.2",

@@ -4,12 +4,13 @@ import type { KeyboardEvent, PointerEvent } from "react";
 
 type DraggableSoundBlockProps = {
     note: string;
+    label?: string;
     start: number;
     duration: number;
     lane: number;
     loopSeconds: number;
     disabled: boolean;
-    onEdit: () => void;
+    onEdit?: () => void;
     onMove: (start: number) => void;
 };
 
@@ -25,7 +26,7 @@ const noteColors: Partial<Record<string, { bgcolor: string; color: string }>> = 
 };
 
 export default function DraggableSoundBlock({
-    note, start, duration, lane, loopSeconds, disabled, onEdit, onMove,
+    note, label = note, start, duration, lane, loopSeconds, disabled, onEdit, onMove,
 }: DraggableSoundBlockProps) {
     const [preview, setPreview] = useState<number | null>(null);
     const drag = useRef<{
@@ -44,7 +45,7 @@ export default function DraggableSoundBlock({
     }
 
     function pointerStart(event: PointerEvent<HTMLDivElement>) {
-        if (disabled || event.button !== 0 || drag.current) return;
+        if (disabled || (!canMove && !onEdit) || event.button !== 0 || drag.current) return;
 
         const trackWidth = event.currentTarget.parentElement?.clientWidth ?? 0;
         if (trackWidth === 0) return;
@@ -86,7 +87,7 @@ export default function DraggableSoundBlock({
 
         // Decide on release so dragging never opens the editor.
         if (!gesture.moved) {
-            onEdit();
+            onEdit?.();
         } else if (canMove && gesture.nextStart !== start) {
             onMove(gesture.nextStart);
         }
@@ -94,7 +95,7 @@ export default function DraggableSoundBlock({
 
     function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
         if (disabled || drag.current) return;
-        if (event.key === "Enter" || event.key === " ") {
+        if (onEdit && (event.key === "Enter" || event.key === " ")) {
             event.preventDefault();
             if (!event.repeat) onEdit();
             return;
@@ -119,8 +120,8 @@ export default function DraggableSoundBlock({
 
     return (
         <Box
-            tabIndex={disabled ? -1 : 0}
-            title={`${note} · ${Number(visibleStart.toFixed(3))} s start · ${duration} s duration`}
+            tabIndex={canMove || (!disabled && onEdit) ? 0 : -1}
+            title={`${label} · ${Number(visibleStart.toFixed(3))} s start · ${duration} s duration`}
             onPointerDown={pointerStart}
             onPointerMove={(event) => {
                 const gesture = updateGesture(event);
@@ -146,13 +147,13 @@ export default function DraggableSoundBlock({
                 overflow: "hidden",
                 typography: "caption",
                 fontWeight: 600,
-                cursor: canMove ? (preview === null ? "grab" : "grabbing") : disabled ? "default" : "pointer",
+                cursor: canMove ? (preview === null ? "grab" : "grabbing") : !disabled && onEdit ? "pointer" : "default",
                 touchAction: disabled ? "auto" : "none",
                 userSelect: "none",
                 zIndex: canMove && preview !== null ? 1 : undefined,
             }}
         >
-            {note}
+            {label}
         </Box>
     );
 }

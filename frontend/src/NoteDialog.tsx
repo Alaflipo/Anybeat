@@ -1,24 +1,24 @@
 import { Autocomplete, Button, Dialog, DialogActions, DialogContent, DialogTitle, TextField } from "@mui/material";
 import { useState } from "react";
 
-const pitchClasses = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+import { drumKeys, midiNoteName } from "./generalMidi";
 
-// List the pitches in MIDI order, with MIDI note 60 written as C4.
-const notes = Array.from({ length: 128 }, (_, pitch) =>
-    `${pitchClasses[pitch % 12]}${Math.floor(pitch / 12) - 1}`,
-);
+const drumNames = new Map(drumKeys.map(({ key, name }) => [midiNoteName(key), name]));
+const notes = Array.from({ length: 128 }, (_, pitch) => midiNoteName(pitch));
 
 type NoteDialogProps = {
     trackName: string;
     onClose: () => void;
     initialNote?: string;
+    isDrumKit: boolean;
     onSave: (note: string) => void;
 };
 
-export default function NoteDialog({ trackName, initialNote, onClose, onSave }: NoteDialogProps) {
+export default function NoteDialog({ trackName, initialNote, isDrumKit, onClose, onSave }: NoteDialogProps) {
     const [note, setNote] = useState<string | null>(initialNote ?? null);
     // Imported or demo notes may use flats, while the default list uses sharps.
-    const options = initialNote && !notes.includes(initialNote) ? [...notes, initialNote] : notes;
+    const sounds = isDrumKit ? [...drumNames.keys()] : notes;
+    const options = initialNote && !sounds.includes(initialNote) ? [...sounds, initialNote] : sounds;
 
     return (
         <Dialog open onClose={onClose} fullWidth maxWidth="xs">
@@ -26,6 +26,7 @@ export default function NoteDialog({ trackName, initialNote, onClose, onSave }: 
             <DialogContent>
                 <Autocomplete
                     options={options}
+                    getOptionLabel={(pitch) => isDrumKit ? drumNames.get(pitch) ?? pitch : pitch}
                     value={note}
                     onChange={(_, pitch) => setNote(pitch)}
                     renderInput={(params) => <TextField {...params} autoFocus label="Note" />}
