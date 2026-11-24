@@ -15,12 +15,13 @@ async function request(path: string, options?: RequestInit) {
     return response;
 }
 
-export async function saveSong(song: Song) {
-    await request("", {
-        method: "POST",
+export async function saveSong(song: Song, id?: string): Promise<{ id: string }> {
+    const response = await request(id === undefined ? "" : `/${encodeURIComponent(id)}`, {
+        method: id === undefined ? "POST" : "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(song),
     });
+    return response.json();
 }
 
 export async function listSongs(): Promise<SongSummary[]> {
