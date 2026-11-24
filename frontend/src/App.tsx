@@ -3,38 +3,56 @@ import { useRef, useState } from "react";
 import SoundTimeline from "./SoundTimeline";
 import type { SoundBlock, SoundTrack } from "./SoundTimeline";
 import { demos } from "./demoTracks";
+import type { Demo } from "./demos/demoData";
 import { importMidi } from "./importMidi";
 
 export default function App() {
-    const [selectedDemo, setSelectedDemo] = useState(0);
-    const [editedDemos, setEditedDemos] = useState<Partial<Record<number, readonly SoundTrack[]>>>({});
-    const [imported, setImported] = useState<ReturnType<typeof importMidi>[]>([]);
+    const [{ arrangements, selectedIndex }, setCatalog] = useState({ arrangements: demos, selectedIndex: 0 });
+    const [editedTracks, setEditedTracks] = useState<Partial<Record<number, readonly SoundTrack[]>>>({});
     const [importError, setImportError] = useState("");
     const fileInput = useRef<HTMLInputElement>(null);
-    const nextImport = useRef(0);
+    const nextUntitled = useRef(1);
     const nextBlockId = useRef(0);
-    const arrangements = [...demos, ...imported];
-    const demo = arrangements[selectedDemo];
+    const arrangement = arrangements[selectedIndex];
+
+    function appendArrangement(arrangement: Demo) {
+        setCatalog((current) => ({
+            arrangements: [...current.arrangements, arrangement],
+            selectedIndex: current.arrangements.length,
+        }));
+    }
+
+    function newArrangement() {
+        appendArrangement({
+            name: `Untitled arrangement ${nextUntitled.current++}`,
+            loopSeconds: 8,
+            tracks: [{ id: "track-1", name: "Track 1", instrument: "program:0", blocks: [] }],
+        });
+    }
 
     async function loadMidi(file: File) {
         setImportError("");
         try {
-            const arrangement = importMidi(await file.arrayBuffer(), file.name);
-            const index = demos.length + nextImport.current++;
-            setImported((current) => [...current, arrangement]);
-            setSelectedDemo(index);
+            appendArrangement(importMidi(await file.arrayBuffer(), file.name));
         } catch (cause) {
             setImportError(cause instanceof Error ? cause.message : "Could not read this MIDI file.");
         }
     }
 
-    function editTrackBlocks(trackId: string, edit: (blocks: readonly SoundBlock[]) => readonly SoundBlock[]) {
-        // Use the latest edited arrangement so adding a note preserves earlier moves.
-        setEditedDemos((current) => ({
+    function editTrack(trackId: string, edit: (track: SoundTrack) => SoundTrack) {
+        setEditedTracks((current) => ({
             ...current,
-            [selectedDemo]: (current[selectedDemo] ?? demo.tracks).map((track) =>
-                track.id === trackId ? { ...track, blocks: edit(track.blocks) } : track),
+            [selectedIndex]: (current[selectedIndex] ?? arrangement.tracks).map((track) =>
+                track.id === trackId ? edit(track) : track),
         }));
+    }
+
+    function editTrackBlocks(trackId: string, edit: (blocks: readonly SoundBlock[]) => readonly SoundBlock[]) {
+        editTrack(trackId, (track) => ({ ...track, blocks: edit(track.blocks) }));
+    }
+
+    function changeInstrument(trackId: string, instrument: SoundTrack["instrument"]) {
+        editTrack(trackId, (track) => ({ ...track, instrument }));
     }
 
     function addBlock(trackId: string, note: string) {
@@ -43,7 +61,7 @@ export default function App() {
             id: `added-note-${nextBlockId.current++}`,
             note,
             start: 0,
-            duration: Math.min(0.5, demo.loopSeconds),
+            duration: Math.min(0.5, arrangement.loopSeconds),
         };
         editTrackBlocks(trackId, (blocks) => [...blocks, block]);
     }
@@ -70,14 +88,18 @@ export default function App() {
                         select
                         size="small"
                         label="Arrangement"
-                        value={selectedDemo}
-                        onChange={(event) => setSelectedDemo(Number(event.target.value))}
+                        value={selectedIndex}
+                        onChange={(event) => {
+                            const selectedIndex = Number(event.target.value);
+                            setCatalog((current) => ({ ...current, selectedIndex }));
+                        }}
                         sx={{ minWidth: 190 }}
                     >
                         {arrangements.map(({ name }, index) => (
                             <MenuItem key={index} value={index}>{name}</MenuItem>
                         ))}
                     </TextField>
+                    <Button onClick={newArrangement}>New arrangement</Button>
                     <Button onClick={() => fileInput.current?.click()}>Upload MIDI</Button>
                     <input
                         ref={fileInput}
@@ -93,9 +115,10 @@ export default function App() {
                 </Stack>
                 {importError && <Alert severity="error" sx={{ mb: 2 }}>{importError}</Alert>}
                 <SoundTimeline
-                    key={selectedDemo}
-                    tracks={editedDemos[selectedDemo] ?? demo.tracks}
-                    loopSeconds={demo.loopSeconds}
+                    key={selectedIndex}
+                    tracks={editedTracks[selectedIndex] ?? arrangement.tracks}
+                    loopSeconds={arrangement.loopSeconds}
+                    onInstrumentChange={changeInstrument}
                     onBlockAdd={addBlock}
                     onBlockNoteChange={changeBlockNote}
                     onBlockTimingChange={changeBlockTiming}
