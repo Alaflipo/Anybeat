@@ -34,7 +34,7 @@ type SoundTimelineProps = {
     loopSeconds: number;
     onBlockAdd: (trackId: string, note: string) => void;
     onBlockNoteChange: (trackId: string, blockId: string, note: string) => void;
-    onBlockMove: (trackId: string, blockId: string, start: number, duration: number) => void;
+    onBlockTimingChange: (trackId: string, blockId: string, start: number, duration: number) => void;
 };
 
 // Prepare the same note timings for the track display and the audio scheduler.
@@ -63,7 +63,7 @@ function layoutBlocks(blocks: readonly SoundBlock[], loopSeconds: number) {
     return { notes, laneCount: Math.max(1, laneEnds.length) };
 }
 
-export default function SoundTimeline({ tracks, loopSeconds, onBlockAdd, onBlockNoteChange, onBlockMove }: SoundTimelineProps) {
+export default function SoundTimeline({ tracks, loopSeconds, onBlockAdd, onBlockNoteChange, onBlockTimingChange }: SoundTimelineProps) {
     // The timeline element holds one CSS position inherited by all the playheads.
     const timeline = useRef<HTMLDivElement>(null);
     // The ref holds the current session's cleanup function, including during async startup.
@@ -278,8 +278,8 @@ export default function SoundTimeline({ tracks, loopSeconds, onBlockAdd, onBlock
                                         onEdit={drumKey === null ? () => {
                                             if (!playback.current) setNoteTarget({ trackId: id, blockId });
                                         } : undefined}
-                                        onMove={(nextStart) => {
-                                            if (!playback.current) onBlockMove(id, blockId, nextStart, duration);
+                                        onTimingChange={(nextStart, nextDuration) => {
+                                            if (!playback.current) onBlockTimingChange(id, blockId, nextStart, nextDuration);
                                         }}
                                     />
                                 ))}

@@ -53,7 +53,7 @@ export default function App() {
             block.id === blockId ? { ...block, note } : block));
     }
 
-    function moveBlock(trackId: string, blockId: string, start: number, duration: number) {
+    function changeBlockTiming(trackId: string, blockId: string, start: number, duration: number) {
         editTrackBlocks(trackId, (blocks) => blocks.map((block) =>
             block.id === blockId ? { ...block, start, duration } : block));
     }
@@ -98,7 +98,7 @@ export default function App() {
                     loopSeconds={demo.loopSeconds}
                     onBlockAdd={addBlock}
                     onBlockNoteChange={changeBlockNote}
-                    onBlockMove={moveBlock}
+                    onBlockTimingChange={changeBlockTiming}
                 />
             </Box>
         </main>

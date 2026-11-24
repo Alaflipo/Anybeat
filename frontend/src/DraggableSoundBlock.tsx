@@ -1,5 +1,5 @@
 import { Box } from "@mui/material";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { KeyboardEvent, PointerEvent } from "react";
 
 type DraggableSoundBlockProps = {
@@ -11,8 +11,11 @@ type DraggableSoundBlockProps = {
     loopSeconds: number;
     disabled: boolean;
     onEdit?: () => void;
-    onMove: (start: number) => void;
+    onTimingChange: (start: number, duration: number) => void;
 };
+
+const minimumResizeSeconds = 0.05;
+type DragMode = "move" | "resize";
 
 // Color follows the note letter across octaves and accidentals.
 const noteColors: Partial<Record<string, { bgcolor: string; color: string }>> = {
@@ -26,10 +29,13 @@ const noteColors: Partial<Record<string, { bgcolor: string; color: string }>> = 
 };
 
 export default function DraggableSoundBlock({
-    note, label = note, start, duration, lane, loopSeconds, disabled, onEdit, onMove,
+    note, label = note, start, duration, lane, loopSeconds, disabled, onEdit, onTimingChange,
 }: DraggableSoundBlockProps) {
-    const [preview, setPreview] = useState<number | null>(null);
+    const [preview, setPreview] = useState<{ mode: DragMode; start: number; duration: number } | null>(null);
+    const block = useRef<HTMLDivElement>(null);
+    const resizeGrip = useRef<HTMLDivElement>(null);
     const drag = useRef<{
+        mode: DragMode;
         pointerId: number;
         x: number;
         y: number;
@@ -38,14 +44,28 @@ export default function DraggableSoundBlock({
     } | null>(null);
     const maxStart = Math.max(0, loopSeconds - duration);
     const canMove = !disabled && maxStart > 0;
-    const visibleStart = canMove ? preview ?? start : start;
+    const visibleStart = disabled ? start : preview?.start ?? start;
+    const visibleDuration = disabled ? duration : preview?.duration ?? duration;
+
+    useEffect(() => {
+        const pointerId = drag.current?.pointerId;
+        const target = block.current;
+        if (!disabled || pointerId === undefined) return;
+
+        drag.current = null;
+        setPreview(null);
+        if (target?.hasPointerCapture(pointerId)) target.releasePointerCapture(pointerId);
+    }, [disabled]);
 
     function clampStart(time: number) {
         return Math.min(maxStart, Math.max(0, time));
     }
 
     function pointerStart(event: PointerEvent<HTMLDivElement>) {
-        if (disabled || (!canMove && !onEdit) || event.button !== 0 || drag.current) return;
+        if (disabled || event.button !== 0 || drag.current) return;
+
+        const mode = event.target === resizeGrip.current ? "resize" : "move";
+        if (mode === "move" && !canMove && !onEdit) return;
 
         const trackWidth = event.currentTarget.parentElement?.clientWidth ?? 0;
         if (trackWidth === 0) return;
@@ -53,6 +73,7 @@ export default function DraggableSoundBlock({
         // Capture keeps the drag active when the pointer leaves the block or track.
         event.currentTarget.setPointerCapture(event.pointerId);
         drag.current = {
+            mode,
             pointerId: event.pointerId,
             x: event.clientX,
             y: event.clientY,
@@ -71,7 +92,15 @@ export default function DraggableSoundBlock({
         // to the starting point still counts as a drag.
         gesture.moved ||= Math.hypot(deltaX, deltaY) >= 5;
         const offset = deltaX / gesture.trackWidth * loopSeconds;
-        return { moved: gesture.moved, nextStart: clampStart(start + offset) };
+        if (gesture.mode === "resize") {
+            const minimum = Math.min(minimumResizeSeconds, duration);
+            const maximum = loopSeconds - start;
+            const requestedDuration = duration + offset;
+            const nextDuration = Math.min(maximum, Math.max(minimum, requestedDuration));
+            return { mode: gesture.mode, moved: gesture.moved, timing: { start, duration: nextDuration } };
+        }
+        const nextStart = canMove ? clampStart(start + offset) : start;
+        return { mode: gesture.mode, moved: gesture.moved, timing: { start: nextStart, duration } };
     }
 
     function clearDrag(event: PointerEvent<HTMLDivElement>) {
@@ -88,8 +117,8 @@ export default function DraggableSoundBlock({
         // Decide on release so dragging never opens the editor.
         if (!gesture.moved) {
             onEdit?.();
-        } else if (canMove && gesture.nextStart !== start) {
-            onMove(gesture.nextStart);
+        } else if (gesture.timing.start !== start || gesture.timing.duration !== duration) {
+            onTimingChange(gesture.timing.start, gesture.timing.duration);
         }
     }
 
@@ -115,17 +144,20 @@ export default function DraggableSoundBlock({
 
         event.preventDefault();
         const nextStart = clampStart(keyTimes[event.key]);
-        if (nextStart !== start) onMove(nextStart);
+        if (nextStart !== start) onTimingChange(nextStart, duration);
     }
 
     return (
         <Box
+            ref={block}
             tabIndex={canMove || (!disabled && onEdit) ? 0 : -1}
-            title={`${label} · ${Number(visibleStart.toFixed(3))} s start · ${duration} s duration`}
+            title={`${label} · ${Number(visibleStart.toFixed(3))} s start · ${Number(visibleDuration.toPrecision(6))} s duration`}
             onPointerDown={pointerStart}
             onPointerMove={(event) => {
                 const gesture = updateGesture(event);
-                if (canMove && gesture?.moved) setPreview(gesture.nextStart);
+                if (!disabled && gesture?.moved && (canMove || gesture.mode === "resize")) {
+                    setPreview({ mode: gesture.mode, ...gesture.timing });
+                }
             }}
             onPointerUp={pointerEnd}
             onPointerCancel={clearDrag}
@@ -134,7 +166,7 @@ export default function DraggableSoundBlock({
             sx={{
                 position: "absolute",
                 left: `${visibleStart / loopSeconds * 100}%`,
-                width: `${duration / loopSeconds * 100}%`,
+                width: `${visibleDuration / loopSeconds * 100}%`,
                 top: lane * 50 + 5,
                 height: 40,
                 borderRadius: 1,
@@ -147,13 +179,30 @@ export default function DraggableSoundBlock({
                 overflow: "hidden",
                 typography: "caption",
                 fontWeight: 600,
-                cursor: canMove ? (preview === null ? "grab" : "grabbing") : !disabled && onEdit ? "pointer" : "default",
+                cursor: !disabled && preview?.mode === "resize"
+                    ? "ew-resize"
+                    : canMove ? (preview === null ? "grab" : "grabbing") : !disabled && onEdit ? "pointer" : "default",
                 touchAction: disabled ? "auto" : "none",
                 userSelect: "none",
-                zIndex: canMove && preview !== null ? 1 : undefined,
+                zIndex: !disabled && preview !== null ? 1 : undefined,
             }}
         >
             {label}
+            {!disabled && (
+                <Box
+                    ref={resizeGrip}
+                    aria-hidden="true"
+                    sx={{
+                        position: "absolute",
+                        insetBlock: 0,
+                        right: 0,
+                        width: "min(8px, 25%)",
+                        bgcolor: "currentColor",
+                        opacity: 0.35,
+                        cursor: "ew-resize",
+                    }}
+                />
+            )}
         </Box>
     );
 }
