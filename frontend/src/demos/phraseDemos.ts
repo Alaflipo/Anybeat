@@ -1,7 +1,7 @@
 import { demoTrack, eventsToBlocks } from "./demoData";
-import type { Demo } from "./demoData";
+import type { Song } from "../song";
 
-export const angry: Demo = {
+export const angry: Song = {
     name: "Angry",
     loopSeconds: 4,
     tracks: [
@@ -41,7 +41,7 @@ export const angry: Demo = {
     ],
 };
 
-export const happy: Demo = {
+export const happy: Song = {
     name: "Happy",
     loopSeconds: 8,
     tracks: [
@@ -79,7 +79,7 @@ export const happy: Demo = {
     ],
 };
 
-export const sad: Demo = {
+export const sad: Song = {
     name: "Sad",
     loopSeconds: 12,
     tracks: [
@@ -114,7 +114,7 @@ export const sad: Demo = {
     ],
 };
 
-export const nature: Demo = {
+export const nature: Song = {
     name: "Nature",
     loopSeconds: 12,
     tracks: [
@@ -159,7 +159,7 @@ export const nature: Demo = {
     ],
 };
 
-export const funk: Demo = {
+export const funk: Song = {
     name: "Funk",
     loopSeconds: 8,
     tracks: [
@@ -182,7 +182,7 @@ export const funk: Demo = {
     ],
 };
 
-export const classical: Demo = {
+export const classical: Song = {
     name: "Classical",
     loopSeconds: 12,
     tracks: [
@@ -205,7 +205,7 @@ export const classical: Demo = {
     ],
 };
 
-export const rock: Demo = {
+export const rock: Song = {
     name: "Rock",
     loopSeconds: 8,
     tracks: [
@@ -233,7 +233,7 @@ export const rock: Demo = {
     ],
 };
 
-export const jazz: Demo = {
+export const jazz: Song = {
     name: "Jazz",
     loopSeconds: 8,
     tracks: [
@@ -258,7 +258,7 @@ export const jazz: Demo = {
     ],
 };
 
-export const theLastStand: Demo = {
+export const theLastStand: Song = {
     name: "The Last Stand",
     loopSeconds: 16,
     tracks: [
@@ -305,7 +305,7 @@ export const theLastStand: Demo = {
     ],
 };
 
-export const snowAtTheEmptyStation: Demo = {
+export const snowAtTheEmptyStation: Song = {
     name: "Snow at the Empty Station",
     loopSeconds: 16,
     tracks: [

@@ -1,7 +1,8 @@
 import { demoTrack } from "./demoData";
-import type { Demo, NoteEvent } from "./demoData";
+import type { Song } from "../song";
+import type { NoteEvent } from "./demoData";
 
-export const drumBreak: Demo = {
+export const drumBreak: Song = {
     name: "Drum Break",
     loopSeconds: 8,
     tracks: [
@@ -32,7 +33,7 @@ export const drumBreak: Demo = {
     ],
 };
 
-export const pop: Demo = {
+export const pop: Song = {
     name: "Pop",
     loopSeconds: 8,
     tracks: [
@@ -55,7 +56,7 @@ export const pop: Demo = {
     ],
 };
 
-export const creativity: Demo = {
+export const creativity: Song = {
     name: "Creativity",
     loopSeconds: 16,
     tracks: [
@@ -133,7 +134,7 @@ export const creativity: Demo = {
     ],
 };
 
-export const sunshineParade: Demo = {
+export const sunshineParade: Song = {
     name: "Sunshine Parade",
     loopSeconds: 16,
     tracks: [
@@ -175,7 +176,7 @@ export const sunshineParade: Demo = {
     ],
 };
 
-export const windowSeatOnTheSteamTrain: Demo = {
+export const windowSeatOnTheSteamTrain: Song = {
     name: "Window Seat on the Steam Train",
     loopSeconds: 12,
     tracks: [
@@ -227,7 +228,7 @@ const christmasRockBars = [
     "G", "D", "C", "G",
 ] as const;
 
-export const christmasRock: Demo = {
+export const christmasRock: Song = {
     name: "Christmas Lights Turned Up",
     loopSeconds: christmasRockBars.length * 2,
     tracks: [

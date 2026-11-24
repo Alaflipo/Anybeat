@@ -24,7 +24,7 @@ export type SoundBlock = {
     velocity?: number;
 };
 
-// A track groups blocks that share one instrument. The ID also identifies its instrument selection.
+// A track groups blocks that share one instrument.
 export type SoundTrack = {
     id: string;
     name: string;
@@ -35,6 +35,8 @@ export type SoundTrack = {
 type SoundTimelineProps = {
     tracks: readonly SoundTrack[];
     loopSeconds: number;
+    onTrackAdd: () => void;
+    onInstrumentChange: (trackId: string, instrument: Instrument) => void;
     onBlockAdd: (trackId: string, note: string) => void;
     onBlockNoteChange: (trackId: string, blockId: string, note: string) => void;
     onBlockTimingChange: (trackId: string, blockId: string, start: number, duration: number) => void;
@@ -78,19 +80,18 @@ function layoutBlocks(blocks: readonly SoundBlock[], loopSeconds: number) {
     return { notes, laneCount: Math.max(1, laneEnds.length) };
 }
 
-export default function SoundTimeline({ tracks, loopSeconds, onBlockAdd, onBlockNoteChange, onBlockTimingChange }: SoundTimelineProps) {
+export default function SoundTimeline({
+    tracks, loopSeconds, onTrackAdd, onInstrumentChange, onBlockAdd, onBlockNoteChange, onBlockTimingChange,
+}: SoundTimelineProps) {
     // The timeline element holds one CSS position inherited by all the playheads.
     const timeline = useRef<HTMLDivElement>(null);
     const playback = useRef<PlaybackSession | null>(null);
     const [active, setActive] = useState<Pick<PlaybackSession, "trackId" | "status" | "pausedAt"> | null>(null);
     const [seekPosition, setSeekPosition] = useState<number | null>(null);
     const seekDrag = useRef<{ pointerId: number; ruler: HTMLDivElement } | null>(null);
-    // Keep each dropdown choice by track ID and fall back to the track's configured instrument.
-    const [selectedInstruments, setSelectedInstruments] = useState<Partial<Record<string, Instrument>>>({});
     const [noteTarget, setNoteTarget] = useState<{ trackId: string; blockId?: string } | null>(null);
     const noteTrack = tracks.find(({ id }) => id === noteTarget?.trackId);
-    const isEditingDrumKit = noteTrack !== undefined &&
-        (selectedInstruments[noteTrack.id] ?? noteTrack.instrument) === "drum-kit";
+    const isEditingDrumKit = noteTrack?.instrument === "drum-kit";
     const editedBlock = noteTrack?.blocks.find(({ id }) => id === noteTarget?.blockId);
     const [error, setError] = useState("");
     const mixStatus = active?.trackId === null ? active.status : "stopped";
@@ -100,11 +101,10 @@ export default function SoundTimeline({ tracks, loopSeconds, onBlockAdd, onBlock
     const canSeek = validLoop && !editingLocked;
     const visibleSeek = canSeek ? seekPosition : null;
     const rulerPosition = visibleSeek ?? active?.pausedAt ?? 0;
-    // Resolve each track's effective instrument and lay out its blocks before playback.
+    // Lay out each track's blocks before playback.
     const arrangedTracks = tracks.map((track) => ({
         ...track,
         ...layoutBlocks(track.blocks, validLoop ? loopSeconds : 0),
-        instrument: selectedInstruments[track.id] ?? track.instrument,
     }));
     // One second is this percentage of the track width. The ruler and grid share that scale.
     const secondWidth = validLoop && loopSeconds >= 1 ? 100 / loopSeconds : 0;
@@ -115,7 +115,7 @@ export default function SoundTimeline({ tracks, loopSeconds, onBlockAdd, onBlock
         : [];
     const canPlay = validLoop && arrangedTracks.some(({ notes }) => notes.length > 0);
 
-    // App remounts the timeline when the selected arrangement changes.
+    // App remounts the timeline when the selected song changes.
     useEffect(() => () => {
         playback.current?.dispose();
         playback.current = null;
@@ -228,9 +228,8 @@ export default function SoundTimeline({ tracks, loopSeconds, onBlockAdd, onBlock
         const element = timeline.current;
         if (!element || !validLoop) return;
 
-        const selectedTracks = trackId === null
-            ? arrangedTracks
-            : arrangedTracks.filter(({ id }) => id === trackId);
+        const playableTracks = arrangedTracks.filter(({ id, notes }) =>
+            notes.length > 0 && (trackId === null || id === trackId));
         const previous = playback.current;
         if (previous && previous.trackId === trackId) {
             if (previous.status === "starting" || previous.status === "pausing") return;
@@ -250,9 +249,9 @@ export default function SoundTimeline({ tracks, loopSeconds, onBlockAdd, onBlock
                 return;
             }
 
-            const sameTracks = previous.tracks.length === selectedTracks.length &&
+            const sameTracks = previous.tracks.length === playableTracks.length &&
                 previous.tracks.every(({ id, blocks, instrument }, index) => {
-                    const track = selectedTracks[index];
+                    const track = playableTracks[index];
                     return id === track.id && blocks === track.blocks && instrument === track.instrument;
                 });
             if (sameTracks && seekPosition === null) {
@@ -262,17 +261,17 @@ export default function SoundTimeline({ tracks, loopSeconds, onBlockAdd, onBlock
             }
         }
 
-        if (!selectedTracks.some(({ notes }) => notes.length > 0)) return;
+        if (playableTracks.length === 0) return;
 
         clearSeekDrag();
         const position = seekPosition ?? (previous?.trackId === trackId ? previous.pausedAt : 0);
         const offset = position === loopSeconds ? 0 : position;
         previous?.dispose();
-        const audio = createTimelineAudio(selectedTracks, loopSeconds, offset);
+        const audio = createTimelineAudio(playableTracks, loopSeconds, offset);
         const session: PlaybackSession = {
             trackId,
             status: "starting",
-            tracks: selectedTracks,
+            tracks: playableTracks,
             audio,
             frame: 0,
             pausedAt: offset,
@@ -428,7 +427,7 @@ export default function SoundTimeline({ tracks, loopSeconds, onBlockAdd, onBlock
                                         disableClearable
                                         disabled={editingLocked}
                                         onChange={(_, value) => {
-                                            setSelectedInstruments((current) => ({ ...current, [id]: value }));
+                                            if (canEdit()) onInstrumentChange(id, value);
                                         }}
                                         sx={{ width: { xs: 170, sm: 245 } }}
                                     />
@@ -488,6 +487,16 @@ export default function SoundTimeline({ tracks, loopSeconds, onBlockAdd, onBlock
                     );
                 })}
             </Stack>
+            <Button
+                startIcon={<AddIcon />}
+                disabled={editingLocked}
+                onClick={() => {
+                    if (canEdit()) onTrackAdd();
+                }}
+                sx={{ alignSelf: "flex-start" }}
+            >
+                Add track
+            </Button>
             {noteTarget && noteTrack && (
                 <NoteDialog
                     key={noteTarget.blockId ?? noteTarget.trackId}
