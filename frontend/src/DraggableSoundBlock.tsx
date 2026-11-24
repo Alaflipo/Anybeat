@@ -15,7 +15,7 @@ type DraggableSoundBlockProps = {
 };
 
 const minimumResizeSeconds = 0.05;
-type DragMode = "move" | "resize";
+type DragMode = "move" | "left" | "right";
 
 // Color follows the note letter across octaves and accidentals.
 const noteColors: Partial<Record<string, { bgcolor: string; color: string }>> = {
@@ -33,7 +33,6 @@ export default function DraggableSoundBlock({
 }: DraggableSoundBlockProps) {
     const [preview, setPreview] = useState<{ mode: DragMode; start: number; duration: number } | null>(null);
     const block = useRef<HTMLDivElement>(null);
-    const resizeGrip = useRef<HTMLDivElement>(null);
     const drag = useRef<{
         mode: DragMode;
         pointerId: number;
@@ -64,7 +63,8 @@ export default function DraggableSoundBlock({
     function pointerStart(event: PointerEvent<HTMLDivElement>) {
         if (disabled || event.button !== 0 || drag.current) return;
 
-        const mode = event.target === resizeGrip.current ? "resize" : "move";
+        const edge = event.target instanceof HTMLElement ? event.target.dataset.resizeEdge : undefined;
+        const mode = edge === "left" || edge === "right" ? edge : "move";
         if (mode === "move" && !canMove && !onEdit) return;
 
         const trackWidth = event.currentTarget.parentElement?.clientWidth ?? 0;
@@ -92,11 +92,18 @@ export default function DraggableSoundBlock({
         // to the starting point still counts as a drag.
         gesture.moved ||= Math.hypot(deltaX, deltaY) >= 5;
         const offset = deltaX / gesture.trackWidth * loopSeconds;
-        if (gesture.mode === "resize") {
+        if (gesture.mode !== "move") {
+            const fromLeft = gesture.mode === "left";
+            const end = start + duration;
             const minimum = Math.min(minimumResizeSeconds, duration);
-            const maximum = loopSeconds - start;
-            const requestedDuration = duration + offset;
+            const maximum = fromLeft ? end : loopSeconds - start;
+            const requestedDuration = fromLeft ? duration - offset : duration + offset;
             const nextDuration = Math.min(maximum, Math.max(minimum, requestedDuration));
+            if (fromLeft && nextDuration !== duration) {
+                const nextStart = end - nextDuration;
+                // Keep adjacent notes in the same lane by reconstructing duration from the fixed end.
+                return { mode: gesture.mode, moved: gesture.moved, timing: { start: nextStart, duration: end - nextStart } };
+            }
             return { mode: gesture.mode, moved: gesture.moved, timing: { start, duration: nextDuration } };
         }
         const nextStart = canMove ? clampStart(start + offset) : start;
@@ -155,7 +162,7 @@ export default function DraggableSoundBlock({
             onPointerDown={pointerStart}
             onPointerMove={(event) => {
                 const gesture = updateGesture(event);
-                if (!disabled && gesture?.moved && (canMove || gesture.mode === "resize")) {
+                if (!disabled && gesture?.moved && (canMove || gesture.mode !== "move")) {
                     setPreview({ mode: gesture.mode, ...gesture.timing });
                 }
             }}
@@ -179,7 +186,7 @@ export default function DraggableSoundBlock({
                 overflow: "hidden",
                 typography: "caption",
                 fontWeight: 600,
-                cursor: !disabled && preview?.mode === "resize"
+                cursor: !disabled && preview && preview.mode !== "move"
                     ? "ew-resize"
                     : canMove ? (preview === null ? "grab" : "grabbing") : !disabled && onEdit ? "pointer" : "default",
                 touchAction: disabled ? "auto" : "none",
@@ -188,21 +195,22 @@ export default function DraggableSoundBlock({
             }}
         >
             {label}
-            {!disabled && (
+            {!disabled && (["left", "right"] as const).map((edge) => (
                 <Box
-                    ref={resizeGrip}
+                    key={edge}
+                    data-resize-edge={edge}
                     aria-hidden="true"
                     sx={{
                         position: "absolute",
                         insetBlock: 0,
-                        right: 0,
+                        [edge]: 0,
                         width: "min(8px, 25%)",
                         bgcolor: "currentColor",
                         opacity: 0.35,
                         cursor: "ew-resize",
                     }}
                 />
-            )}
+            ))}
         </Box>
     );
 }
