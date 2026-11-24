@@ -5,6 +5,7 @@ import type { KeyboardEvent, PointerEvent } from "react";
 type DraggableSoundBlockProps = {
     note: string;
     label?: string;
+    showLabel?: boolean;
     start: number;
     duration: number;
     lane: number;
@@ -29,7 +30,7 @@ const noteColors: Partial<Record<string, { bgcolor: string; color: string }>> = 
 };
 
 export default function DraggableSoundBlock({
-    note, label = note, start, duration, lane, loopSeconds, disabled, onEdit, onTimingChange,
+    note, label = note, showLabel = true, start, duration, lane, loopSeconds, disabled, onEdit, onTimingChange,
 }: DraggableSoundBlockProps) {
     const [preview, setPreview] = useState<{ mode: DragMode; start: number; duration: number } | null>(null);
     const block = useRef<HTMLDivElement>(null);
@@ -194,7 +195,7 @@ export default function DraggableSoundBlock({
                 zIndex: !disabled && preview !== null ? 1 : undefined,
             }}
         >
-            {label}
+            {showLabel && label}
             {!disabled && (["left", "right"] as const).map((edge) => (
                 <Box
                     key={edge}
