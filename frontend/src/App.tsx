@@ -6,13 +6,6 @@ import { demos } from "./demoTracks";
 import type { Song } from "./song";
 import { importMidi } from "./importMidi";
 
-type CatalogEntry = {
-    song: Song;
-    source: "demo" | "blank" | "import";
-};
-
-const demoEntries: readonly CatalogEntry[] = demos.map((song) => ({ song, source: "demo" }));
-
 function createPianoTrack(tracks: readonly SoundTrack[]): SoundTrack {
     const names = new Set(tracks.map(({ name }) => name));
     const ids = new Set(tracks.map(({ id }) => id));
@@ -24,19 +17,17 @@ function createPianoTrack(tracks: readonly SoundTrack[]): SoundTrack {
 }
 
 export default function App() {
-    const [{ songs, selectedIndex }, setCatalog] = useState({ songs: demoEntries, selectedIndex: 0 });
+    const [{ songs, selectedIndex }, setCatalog] = useState({ songs: demos, selectedIndex: 0 });
     const [editedTracks, setEditedTracks] = useState<Partial<Record<number, readonly SoundTrack[]>>>({});
     const [importError, setImportError] = useState("");
     const fileInput = useRef<HTMLInputElement>(null);
     const nextUntitled = useRef(1);
     const nextBlockId = useRef(0);
-    const { song } = songs[selectedIndex];
-    const blankNames = new Set(songs.filter(({ source }) => source === "blank")
-        .map(({ song }) => song.name));
+    const song = songs[selectedIndex];
 
-    function appendSong(song: Song, source: CatalogEntry["source"]) {
+    function appendSong(song: Song) {
         setCatalog((current) => ({
-            songs: [...current.songs, { song, source }],
+            songs: [...current.songs, song],
             selectedIndex: current.songs.length,
         }));
     }
@@ -46,13 +37,13 @@ export default function App() {
             name: `Untitled song ${nextUntitled.current++}`,
             loopSeconds: 8,
             tracks: [createPianoTrack([])],
-        }, "blank");
+        });
     }
 
     async function loadMidi(file: File) {
         setImportError("");
         try {
-            appendSong(importMidi(await file.arrayBuffer(), file.name), "import");
+            appendSong(importMidi(await file.arrayBuffer(), file.name));
         } catch (cause) {
             setImportError(cause instanceof Error ? cause.message : "Could not read this MIDI file.");
         }
@@ -121,10 +112,8 @@ export default function App() {
                         }}
                         sx={{ width: "min(100%, 250px)" }}
                     >
-                        {songs.map(({ song: { name }, source }, index) => (
-                            <MenuItem key={index} value={index}>
-                                {source === "import" && blankNames.has(name) ? `${name} (MIDI import)` : name}
-                            </MenuItem>
+                        {songs.map(({ name }, index) => (
+                            <MenuItem key={index} value={index}>{name}</MenuItem>
                         ))}
                     </TextField>
                     <Button onClick={newSong}>New song</Button>
