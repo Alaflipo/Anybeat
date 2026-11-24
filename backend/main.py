@@ -1,6 +1,4 @@
-import os
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.exception_handlers import request_validation_exception_handler
@@ -9,12 +7,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from songs import initialize_library, router as songs_router
+from songs import database_path, initialize_library, router as songs_router
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    path = Path(os.environ.get("ANYBEAT_DB_PATH", Path(__file__).parent / "data" / "songs.sqlite3"))
+    path = database_path()
     initialize_library(path)
     app.state.song_db_path = path
     yield

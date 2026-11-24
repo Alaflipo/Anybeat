@@ -1,25 +1,18 @@
 import {
     Alert, Box, Button, Dialog, DialogActions, DialogContent, DialogTitle,
-    List, ListItem, ListItemButton, ListItemText, MenuItem, Stack, TextField, Typography,
+    MenuItem, Stack, TextField, Typography,
 } from "@mui/material";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import SoundTimeline from "./SoundTimeline";
 import type { SoundBlock, SoundTrack } from "./SoundTimeline";
-import { demos } from "./demoTracks";
 import type { Song } from "./song";
 import { importMidi } from "./importMidi";
 import { listSongs, loadSong, saveSong } from "./songApi";
 import type { SongSummary } from "./songApi";
 
-type SaveStatus = { kind: "pending" | "success" | "error"; message: string };
-type SavedSnapshot = { id: string; tracks: Song["tracks"] };
-type SongCatalog = {
-    songs: readonly Song[];
-    selectedIndex: number;
-    saved: Partial<Record<number, SavedSnapshot>>;
-};
-
-const savedAtFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "medium" });
+type OperationStatus = { kind: "pending" | "success" | "error"; message: string };
+type Editor = { song: Song; saved?: { id: string; tracks: Song["tracks"] } };
+type OpenEditor = () => Promise<Editor> | Editor;
 
 function createPianoTrack(tracks: readonly SoundTrack[]): SoundTrack {
     const names = new Set(tracks.map(({ name }) => name));
@@ -31,112 +24,123 @@ function createPianoTrack(tracks: readonly SoundTrack[]): SoundTrack {
     return { id: `track-${idNumber}`, name: `Track ${nameNumber}`, instrument: "program:0", blocks: [] };
 }
 
+async function loadSavedEditor(id: string): Promise<Editor> {
+    try {
+        const song = await loadSong(id);
+        return { song, saved: { id, tracks: song.tracks } };
+    } catch {
+        throw new Error("Could not open this song. Select it again to retry.");
+    }
+}
+
 export default function App() {
-    const [{ songs, selectedIndex, saved }, setCatalog] = useState<SongCatalog>({
-        songs: demos,
-        selectedIndex: 0,
-        saved: {},
-    });
-    const [editedTracks, setEditedTracks] = useState<Partial<Record<number, readonly SoundTrack[]>>>({});
-    const [importError, setImportError] = useState("");
-    const [saveStatus, setSaveStatus] = useState<SaveStatus | null>(null);
-    const [libraryOpen, setLibraryOpen] = useState(false);
-    const [librarySongs, setLibrarySongs] = useState<SongSummary[] | null>(null);
-    const [libraryPending, setLibraryPending] = useState("");
+    const [editor, setEditor] = useState<Editor | null>(null);
+    const [editorVersion, setEditorVersion] = useState(0);
+    const [librarySongs, setLibrarySongs] = useState<SongSummary[]>([]);
+    const [libraryLoading, setLibraryLoading] = useState(true);
     const [libraryError, setLibraryError] = useState("");
+    const [libraryRequest, setLibraryRequest] = useState({ openFirst: true });
+    const [openStatus, setOpenStatus] = useState<OperationStatus | null>(null);
+    const [saveStatus, setSaveStatus] = useState<OperationStatus | null>(null);
+    const [replacement, setReplacement] = useState<OpenEditor | null>(null);
     const fileInput = useRef<HTMLInputElement>(null);
     const nextUntitled = useRef(1);
-    const song = songs[selectedIndex];
-    const tracks = editedTracks[selectedIndex] ?? song.tracks;
-    const savedSnapshot = saved[selectedIndex];
-    const isSaving = saveStatus?.kind === "pending";
-    const isUnsaved = savedSnapshot
-        ? tracks !== savedSnapshot.tracks
-        : selectedIndex >= demos.length || tracks !== song.tracks;
+    const song = editor?.song;
+    const savedId = editor?.saved?.id;
+    const isUnsaved = Boolean(editor && song?.tracks !== editor.saved?.tracks);
+    const isOpening = libraryLoading || openStatus?.kind === "pending";
+    const busy = isOpening || saveStatus?.kind === "pending";
 
-    function appendSong(song: Song, savedId?: string) {
-        setCatalog((current) => ({
-            songs: [...current.songs, song],
-            selectedIndex: current.songs.length,
-            saved: savedId === undefined ? current.saved : {
-                ...current.saved,
-                [current.songs.length]: { id: savedId, tracks: song.tracks },
-            },
-        }));
-    }
+    useEffect(() => {
+        let cancelled = false;
 
-    function newSong() {
-        appendSong({
-            name: `Untitled song ${nextUntitled.current++}`,
-            loopSeconds: 8,
-            tracks: [createPianoTrack([])],
-        });
-    }
+        async function initialize() {
+            try {
+                const songs = await listSongs();
+                if (cancelled) return;
+                setLibrarySongs(songs);
+                if (libraryRequest.openFirst && songs.length > 0) {
+                    try {
+                        const first = await loadSavedEditor(songs[0].id);
+                        if (!cancelled) setEditor(first);
+                    } catch (cause) {
+                        if (!cancelled) setOpenStatus({
+                            kind: "error",
+                            message: cause instanceof Error ? cause.message : "Could not open song.",
+                        });
+                    }
+                }
+            } catch {
+                if (!cancelled) setLibraryError("Could not load saved songs.");
+            } finally {
+                if (!cancelled) setLibraryLoading(false);
+            }
+        }
 
-    async function loadMidi(file: File) {
-        setImportError("");
+        void initialize();
+        return () => { cancelled = true; };
+    }, [libraryRequest]);
+
+    async function replaceEditor(open: OpenEditor) {
+        setOpenStatus({ kind: "pending", message: "Opening song…" });
         try {
-            appendSong(importMidi(await file.arrayBuffer(), file.name));
+            const next = await open();
+            setEditor(next);
+            setEditorVersion((version) => version + 1);
+            setSaveStatus(null);
+            setOpenStatus(null);
         } catch (cause) {
-            setImportError(cause instanceof Error ? cause.message : "Could not read this MIDI file.");
+            setOpenStatus({
+                kind: "error",
+                message: cause instanceof Error ? cause.message : "Could not open song.",
+            });
         }
     }
 
-    async function saveCurrentSong() {
-        if (isSaving) return;
-        const { name, loopSeconds } = song;
+    function requestReplacement(open: OpenEditor) {
+        if (busy) return;
+        if (isUnsaved) {
+            setSaveStatus(null);
+            setReplacement(() => open);
+        } else {
+            void replaceEditor(open);
+        }
+    }
+
+    async function saveCurrentSong(): Promise<boolean> {
+        if (!song || busy) return false;
+        const { name } = song;
         setSaveStatus({ kind: "pending", message: `Saving “${name}”…` });
         try {
-            const { id } = await saveSong({ name, loopSeconds, tracks }, savedSnapshot?.id);
-            // Store the submitted tracks against the initiating editor entry.
-            setCatalog((current) => ({
+            const saved = await saveSong(song, savedId);
+            setEditor((current) => current && {
                 ...current,
-                saved: { ...current.saved, [selectedIndex]: { id, tracks } },
-            }));
+                saved: { id: saved.id, tracks: song.tracks },
+            });
+            setLibrarySongs((current) => [
+                { id: saved.id, name: saved.name },
+                ...current.filter(({ id }) => id !== saved.id),
+            ]);
             setSaveStatus({ kind: "success", message: `Song saved: ${name}.` });
+            return true;
         } catch {
-            setSaveStatus({ kind: "error", message: `Could not save “${name}”. Select Save song to try again.` });
+            setSaveStatus({ kind: "error", message: `Could not save “${name}”. Try again.` });
+            return false;
         }
     }
 
-    async function refreshLibrary() {
-        setLibrarySongs(null);
-        setLibraryError("");
-        setLibraryPending("Loading saved songs…");
-        try {
-            setLibrarySongs(await listSongs());
-        } catch {
-            setLibraryError("Could not load saved songs.");
-        } finally {
-            setLibraryPending("");
-        }
-    }
-
-    async function openSavedSong(summary: SongSummary) {
-        const existingIndex = songs.findIndex((_, index) => saved[index]?.id === summary.id);
-        if (existingIndex !== -1) {
-            setCatalog((current) => ({ ...current, selectedIndex: existingIndex }));
-            setLibraryOpen(false);
-            return;
-        }
-
-        setLibraryError("");
-        setLibraryPending(`Opening “${summary.name}”…`);
-        try {
-            appendSong(await loadSong(summary.id), summary.id);
-            setLibraryOpen(false);
-        } catch {
-            setLibraryError(`Could not open “${summary.name}”. Select it again to retry.`);
-        } finally {
-            setLibraryPending("");
-        }
+    async function confirmReplacement(save: boolean) {
+        if (!replacement || busy) return;
+        if (save && !await saveCurrentSong()) return;
+        setReplacement(null);
+        await replaceEditor(replacement);
     }
 
     function editTracks(edit: (tracks: readonly SoundTrack[]) => readonly SoundTrack[]) {
-        setEditedTracks((current) => ({
+        setEditor((current) => current && {
             ...current,
-            [selectedIndex]: edit(current[selectedIndex] ?? song.tracks),
-        }));
+            song: { ...current.song, tracks: edit(current.song.tracks) },
+        });
     }
 
     function addTrack() {
@@ -156,6 +160,8 @@ export default function App() {
     }
 
     function addBlock(trackId: string, note: string) {
+        const loopSeconds = song?.loopSeconds;
+        if (loopSeconds === undefined) return;
         editTrackBlocks(trackId, (blocks) => {
             const ids = new Set(blocks.map(({ id }) => id));
             let index = blocks.length;
@@ -165,7 +171,7 @@ export default function App() {
                 id: `added-note-${index}`,
                 note,
                 start: 0,
-                duration: Math.min(0.5, song.loopSeconds),
+                duration: Math.min(0.5, loopSeconds),
             }];
         });
     }
@@ -192,28 +198,29 @@ export default function App() {
                         select
                         size="small"
                         label="Song"
-                        value={selectedIndex}
+                        value={savedId ?? ""}
+                        disabled={busy || librarySongs.length === 0}
                         onChange={(event) => {
-                            const selectedIndex = Number(event.target.value);
-                            setCatalog((current) => ({ ...current, selectedIndex }));
+                            const id = event.target.value;
+                            if (id !== savedId) requestReplacement(() => loadSavedEditor(id));
                         }}
                         sx={{ width: "min(100%, 250px)" }}
                     >
-                        {songs.map(({ name }, index) => (
-                            <MenuItem key={index} value={index}>{name}</MenuItem>
+                        {librarySongs.map(({ id, name }) => (
+                            <MenuItem key={id} value={id}>{name}</MenuItem>
                         ))}
                     </TextField>
-                    <Button onClick={newSong}>New song</Button>
-                    <Button disabled={isSaving} onClick={() => void saveCurrentSong()}>
+                    <Button disabled={busy} onClick={() => requestReplacement(() => ({
+                        song: {
+                            name: `Untitled song ${nextUntitled.current++}`,
+                            loopSeconds: 8,
+                            tracks: [createPianoTrack([])],
+                        },
+                    }))}>New song</Button>
+                    <Button disabled={!song || busy} onClick={() => void saveCurrentSong()}>
                         Save song
                     </Button>
-                    <Button disabled={isSaving} onClick={() => {
-                        setLibraryOpen(true);
-                        void refreshLibrary();
-                    }}>
-                        Open song
-                    </Button>
-                    <Button onClick={() => fileInput.current?.click()}>Upload MIDI</Button>
+                    <Button disabled={busy} onClick={() => fileInput.current?.click()}>Upload MIDI</Button>
                     <input
                         ref={fileInput}
                         type="file"
@@ -222,64 +229,71 @@ export default function App() {
                         onChange={(event) => {
                             const file = event.target.files?.[0];
                             event.target.value = "";
-                            if (file) void loadMidi(file);
+                            if (file) requestReplacement(async () => ({
+                                song: importMidi(await file.arrayBuffer(), file.name),
+                            }));
                         }}
                     />
                 </Stack>
-                {isUnsaved && <Typography role="status" sx={{ mb: 2 }}>Unsaved changes</Typography>}
-                {saveStatus && (
+                {libraryLoading && <Typography role="status" sx={{ mb: 2 }}>Loading saved songs…</Typography>}
+                {libraryError && (
+                    <Alert severity="error" sx={{ mb: 2 }} action={
+                        <Button color="inherit" disabled={busy} onClick={() => {
+                            setLibraryError("");
+                            setLibraryLoading(true);
+                            setLibraryRequest({ openFirst: !editor });
+                        }}>Retry</Button>
+                    }>{libraryError}</Alert>
+                )}
+                {!libraryLoading && !libraryError && librarySongs.length === 0 && (
+                    <Typography sx={{ mb: 2 }}>No saved songs yet.</Typography>
+                )}
+                {openStatus && (
+                    <Alert severity={openStatus.kind === "pending" ? "info" : openStatus.kind} sx={{ mb: 2 }}>
+                        {openStatus.message}
+                    </Alert>
+                )}
+                {isUnsaved && <Typography role="status" sx={{ mb: 2 }}>
+                    {savedId ? "Unsaved changes" : `${song?.name} · Unsaved changes`}
+                </Typography>}
+                {saveStatus && !replacement && (
                     <Alert severity={saveStatus.kind === "pending" ? "info" : saveStatus.kind} sx={{ mb: 2 }}>
                         {saveStatus.message}
                     </Alert>
                 )}
-                {importError && <Alert severity="error" sx={{ mb: 2 }}>{importError}</Alert>}
-                <SoundTimeline
-                    key={selectedIndex}
-                    tracks={tracks}
-                    loopSeconds={song.loopSeconds}
-                    onTrackAdd={addTrack}
-                    onInstrumentChange={changeInstrument}
-                    onBlockAdd={addBlock}
-                    onBlockNoteChange={changeBlockNote}
-                    onBlockTimingChange={changeBlockTiming}
-                />
+                {song && (
+                    <Box inert={isOpening}>
+                        <SoundTimeline
+                            key={editorVersion}
+                            tracks={song.tracks}
+                            loopSeconds={song.loopSeconds}
+                            onTrackAdd={addTrack}
+                            onInstrumentChange={changeInstrument}
+                            onBlockAdd={addBlock}
+                            onBlockNoteChange={changeBlockNote}
+                            onBlockTimingChange={changeBlockTiming}
+                        />
+                    </Box>
+                )}
             </Box>
             <Dialog
-                open={libraryOpen}
-                onClose={() => { if (!libraryPending) setLibraryOpen(false); }}
-                aria-labelledby="open-song-title"
-                fullWidth
-                maxWidth="sm"
+                open={Boolean(replacement)}
+                onClose={() => { if (!busy) setReplacement(null); }}
+                aria-labelledby="unsaved-song-title"
             >
-                <DialogTitle id="open-song-title">Open song</DialogTitle>
+                <DialogTitle id="unsaved-song-title">Unsaved changes</DialogTitle>
                 <DialogContent>
-                    {libraryPending && <Typography role="status">{libraryPending}</Typography>}
-                    {libraryError && <Alert severity="error">{libraryError}</Alert>}
-                    {librarySongs?.length === 0 && <Typography>No saved songs yet.</Typography>}
-                    {librarySongs && librarySongs.length > 0 && (
-                        <List disablePadding>
-                            {librarySongs.map((saved) => (
-                                <ListItem disablePadding key={saved.id}>
-                                    <ListItemButton
-                                        component="button"
-                                        disabled={Boolean(libraryPending)}
-                                        onClick={() => void openSavedSong(saved)}
-                                    >
-                                        <ListItemText
-                                            primary={saved.name}
-                                            secondary={savedAtFormat.format(new Date(saved.updatedAt))}
-                                        />
-                                    </ListItemButton>
-                                </ListItem>
-                            ))}
-                        </List>
+                    <Typography>Save changes to “{song?.name}” before switching songs?</Typography>
+                    {saveStatus && (
+                        <Alert severity={saveStatus.kind === "pending" ? "info" : saveStatus.kind} sx={{ mt: 2 }}>
+                            {saveStatus.message}
+                        </Alert>
                     )}
                 </DialogContent>
                 <DialogActions>
-                    {libraryError && librarySongs === null && (
-                        <Button onClick={() => void refreshLibrary()}>Retry</Button>
-                    )}
-                    <Button disabled={Boolean(libraryPending)} onClick={() => setLibraryOpen(false)}>Close</Button>
+                    <Button disabled={busy} onClick={() => setReplacement(null)}>Cancel</Button>
+                    <Button disabled={busy} onClick={() => void confirmReplacement(false)}>Discard</Button>
+                    <Button disabled={busy} onClick={() => void confirmReplacement(true)}>Save</Button>
                 </DialogActions>
             </Dialog>
         </main>

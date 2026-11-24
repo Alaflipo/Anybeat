@@ -1,4 +1,6 @@
 import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -32,6 +34,45 @@ class SongApiTest(unittest.TestCase):
         directory = self.enterContext(tempfile.TemporaryDirectory())
         path = Path(directory) / "library.sqlite3"
         self.enterContext(patch.dict(os.environ, {"ANYBEAT_DB_PATH": str(path)}))
+
+    def test_manual_demo_import_preserves_existing_songs_and_edits(self):
+        def import_demos():
+            result = subprocess.run(
+                [sys.executable, "-m", "import_demo_songs"],
+                cwd=Path(__file__).parent,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+        with TestClient(app) as client:
+            self.assertEqual(client.get("/api/songs").json(), [])
+            existing = client.post("/api/songs", json={**SONG, "name": "Original"}).json()
+
+            import_demos()
+            summaries = client.get("/api/songs").json()
+            self.assertEqual(len(summaries), 20)
+            self.assertEqual(sum(summary["name"] == "Original" for summary in summaries), 2)
+            for summary in summaries:
+                with self.subTest(song_id=summary["id"]):
+                    self.assertEqual(client.get(f"/api/songs/{summary['id']}").status_code, 200)
+            original_id = "demo-original"
+            original = client.get(f"/api/songs/{original_id}").json()
+            self.assertEqual(original["name"], "Original")
+            self.assertTrue(original["tracks"][0]["blocks"])
+
+            renamed = {**original, "name": "Edited demo"}
+            self.assertEqual(
+                client.put(f"/api/songs/{original_id}", json={
+                    key: value for key, value in renamed.items() if key != "id"
+                }).status_code,
+                200,
+            )
+
+            import_demos()
+            self.assertEqual(len(client.get("/api/songs").json()), 20)
+            self.assertEqual(client.get(f"/api/songs/{original_id}").json(), renamed)
+            self.assertEqual(client.get(f"/api/songs/{existing['id']}").json(), existing)
 
     def test_song_survives_app_restart(self):
         with TestClient(app) as client:

@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import sqlite3
 from contextlib import closing, contextmanager
@@ -79,7 +80,7 @@ class Song(SongData):
         return self
 
     def storage_payload(self) -> str:
-        return self.model_dump_json(exclude={"name"}, exclude_none=True)
+        return self.model_dump_json(exclude={"name", "id"}, exclude_none=True)
 
 
 class SavedSong(Song):
@@ -97,6 +98,10 @@ def connect(path: Path) -> Iterator[sqlite3.Connection]:
     with closing(sqlite3.connect(path)) as connection, connection:
         connection.row_factory = sqlite3.Row
         yield connection
+
+
+def database_path() -> Path:
+    return Path(os.environ.get("ANYBEAT_DB_PATH", Path(__file__).parent / "data" / "songs.sqlite3"))
 
 
 def initialize_library(path: Path) -> None:

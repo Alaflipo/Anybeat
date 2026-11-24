@@ -3,7 +3,6 @@ import type { Song } from "./song";
 export type SongSummary = {
     id: string;
     name: string;
-    updatedAt: string;
 };
 
 async function request(path: string, options?: RequestInit) {
@@ -15,11 +14,11 @@ async function request(path: string, options?: RequestInit) {
     return response;
 }
 
-export async function saveSong(song: Song, id?: string): Promise<{ id: string }> {
+export async function saveSong({ name, loopSeconds, tracks }: Song, id?: string): Promise<SongSummary> {
     const response = await request(id === undefined ? "" : `/${encodeURIComponent(id)}`, {
         method: id === undefined ? "POST" : "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(song),
+        body: JSON.stringify({ name, loopSeconds, tracks }),
     });
     return response.json();
 }
