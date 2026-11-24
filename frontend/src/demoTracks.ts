@@ -4,13 +4,13 @@
 // For example, [0.5, 0.25, "C4", "E4", "G4"] becomes three blocks, one per pitch.
 // Every track in this catalog ultimately provides a list of SoundBlocks.
 
-import type { Demo } from "./demos/demoData";
+import type { Arrangement } from "./arrangement";
 import { original } from "./demos/blockDemos";
 import { angry, happy, sad, nature, funk, classical, rock, jazz, theLastStand, snowAtTheEmptyStation } from "./demos/phraseDemos";
 import { drumBreak, pop, creativity, sunshineParade, windowSeatOnTheSteamTrain, christmasRock } from "./demos/patternDemos";
 import { jazzDrumBreak, popDrumBreak } from "./demos/combinedDemos";
 
-export const demos: readonly Demo[] = [
+export const demos: readonly Arrangement[] = [
     original,
     angry,
     happy,

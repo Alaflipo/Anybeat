@@ -1,9 +1,10 @@
+import type { Arrangement } from "./arrangement";
 import { parseMidi } from "midi-file";
 import { instruments, midiNoteName } from "./generalMidi";
 import type { Instrument } from "./generalMidi";
 import type { SoundTrack } from "./SoundTimeline";
 
-export function importMidi(buffer: ArrayBuffer, filename: string) {
+export function importMidi(buffer: ArrayBuffer, filename: string): Arrangement {
     const bytes = new Uint8Array(buffer);
     if (bytes.length < 14 || String.fromCharCode(...bytes.subarray(0, 4)) !== "MThd") {
         throw new Error("Select a valid Standard MIDI file.");

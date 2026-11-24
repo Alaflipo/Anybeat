@@ -1,14 +1,14 @@
-import type { Demo } from "./demoData";
+import type { Arrangement } from "../arrangement";
 import { drumBreak, pop } from "./patternDemos";
 import { jazz } from "./phraseDemos";
 
-export const jazzDrumBreak: Demo = {
+export const jazzDrumBreak: Arrangement = {
     name: "Jazz Drum Break",
     loopSeconds: jazz.loopSeconds,
     tracks: [...jazz.tracks, ...drumBreak.tracks],
 };
 
-export const popDrumBreak: Demo = {
+export const popDrumBreak: Arrangement = {
     name: "Pop Drum Break",
     loopSeconds: pop.loopSeconds,
     // The break supplies the kick for this arrangement.

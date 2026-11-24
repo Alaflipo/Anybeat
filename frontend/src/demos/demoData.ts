@@ -6,12 +6,6 @@
 
 import type { SoundBlock, SoundTrack } from "../SoundTimeline";
 
-export type Demo = {
-    name: string;
-    loopSeconds: number;
-    tracks: readonly SoundTrack[];
-};
-
 export type NoteEvent = [start: number, duration: number, ...notes: string[]];
 
 // Pitches listed at the same time form a chord, with one block per pitch.

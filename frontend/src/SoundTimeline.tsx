@@ -228,9 +228,8 @@ export default function SoundTimeline({
         const element = timeline.current;
         if (!element || !validLoop) return;
 
-        const selectedTracks = trackId === null
-            ? arrangedTracks
-            : arrangedTracks.filter(({ id }) => id === trackId);
+        const playableTracks = arrangedTracks.filter(({ id, notes }) =>
+            notes.length > 0 && (trackId === null || id === trackId));
         const previous = playback.current;
         if (previous && previous.trackId === trackId) {
             if (previous.status === "starting" || previous.status === "pausing") return;
@@ -250,9 +249,9 @@ export default function SoundTimeline({
                 return;
             }
 
-            const sameTracks = previous.tracks.length === selectedTracks.length &&
+            const sameTracks = previous.tracks.length === playableTracks.length &&
                 previous.tracks.every(({ id, blocks, instrument }, index) => {
-                    const track = selectedTracks[index];
+                    const track = playableTracks[index];
                     return id === track.id && blocks === track.blocks && instrument === track.instrument;
                 });
             if (sameTracks && seekPosition === null) {
@@ -262,17 +261,17 @@ export default function SoundTimeline({
             }
         }
 
-        if (!selectedTracks.some(({ notes }) => notes.length > 0)) return;
+        if (playableTracks.length === 0) return;
 
         clearSeekDrag();
         const position = seekPosition ?? (previous?.trackId === trackId ? previous.pausedAt : 0);
         const offset = position === loopSeconds ? 0 : position;
         previous?.dispose();
-        const audio = createTimelineAudio(selectedTracks, loopSeconds, offset);
+        const audio = createTimelineAudio(playableTracks, loopSeconds, offset);
         const session: PlaybackSession = {
             trackId,
             status: "starting",
-            tracks: selectedTracks,
+            tracks: playableTracks,
             audio,
             frame: 0,
             pausedAt: offset,

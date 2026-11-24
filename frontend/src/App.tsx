@@ -3,8 +3,15 @@ import { useRef, useState } from "react";
 import SoundTimeline from "./SoundTimeline";
 import type { SoundBlock, SoundTrack } from "./SoundTimeline";
 import { demos } from "./demoTracks";
-import type { Demo } from "./demos/demoData";
+import type { Arrangement } from "./arrangement";
 import { importMidi } from "./importMidi";
+
+type CatalogEntry = {
+    arrangement: Arrangement;
+    source: "demo" | "blank" | "import";
+};
+
+const demoEntries: readonly CatalogEntry[] = demos.map((arrangement) => ({ arrangement, source: "demo" }));
 
 function createPianoTrack(tracks: readonly SoundTrack[]): SoundTrack {
     const names = new Set(tracks.map(({ name }) => name));
@@ -17,17 +24,19 @@ function createPianoTrack(tracks: readonly SoundTrack[]): SoundTrack {
 }
 
 export default function App() {
-    const [{ arrangements, selectedIndex }, setCatalog] = useState({ arrangements: demos, selectedIndex: 0 });
+    const [{ arrangements, selectedIndex }, setCatalog] = useState({ arrangements: demoEntries, selectedIndex: 0 });
     const [editedTracks, setEditedTracks] = useState<Partial<Record<number, readonly SoundTrack[]>>>({});
     const [importError, setImportError] = useState("");
     const fileInput = useRef<HTMLInputElement>(null);
     const nextUntitled = useRef(1);
     const nextBlockId = useRef(0);
-    const arrangement = arrangements[selectedIndex];
+    const { arrangement } = arrangements[selectedIndex];
+    const blankNames = new Set(arrangements.filter(({ source }) => source === "blank")
+        .map(({ arrangement }) => arrangement.name));
 
-    function appendArrangement(arrangement: Demo) {
+    function appendArrangement(arrangement: Arrangement, source: CatalogEntry["source"]) {
         setCatalog((current) => ({
-            arrangements: [...current.arrangements, arrangement],
+            arrangements: [...current.arrangements, { arrangement, source }],
             selectedIndex: current.arrangements.length,
         }));
     }
@@ -37,13 +46,13 @@ export default function App() {
             name: `Untitled arrangement ${nextUntitled.current++}`,
             loopSeconds: 8,
             tracks: [createPianoTrack([])],
-        });
+        }, "blank");
     }
 
     async function loadMidi(file: File) {
         setImportError("");
         try {
-            appendArrangement(importMidi(await file.arrayBuffer(), file.name));
+            appendArrangement(importMidi(await file.arrayBuffer(), file.name), "import");
         } catch (cause) {
             setImportError(cause instanceof Error ? cause.message : "Could not read this MIDI file.");
         }
@@ -100,7 +109,7 @@ export default function App() {
                 <Typography variant="h4" component="h2" sx={{ mb: 2 }}>
                     Music timeline experiment
                 </Typography>
-                <Stack direction="row" spacing={2} sx={{ alignItems: "center", mb: 2 }}>
+                <Stack direction="row" useFlexGap spacing={2} sx={{ flexWrap: "wrap", alignItems: "center", mb: 2 }}>
                     <TextField
                         select
                         size="small"
@@ -110,10 +119,12 @@ export default function App() {
                             const selectedIndex = Number(event.target.value);
                             setCatalog((current) => ({ ...current, selectedIndex }));
                         }}
-                        sx={{ minWidth: 190 }}
+                        sx={{ width: "min(100%, 250px)" }}
                     >
-                        {arrangements.map(({ name }, index) => (
-                            <MenuItem key={index} value={index}>{name}</MenuItem>
+                        {arrangements.map(({ arrangement: { name }, source }, index) => (
+                            <MenuItem key={index} value={index}>
+                                {source === "import" && blankNames.has(name) ? `${name} (MIDI import)` : name}
+                            </MenuItem>
                         ))}
                     </TextField>
                     <Button onClick={newArrangement}>New arrangement</Button>
