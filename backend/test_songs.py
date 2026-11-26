@@ -106,6 +106,30 @@ class SongApiTest(unittest.TestCase):
                 self.assertEqual(client.get(f"/api/songs/{saved['id']}").json(), saved)
                 self.assertEqual(client.get("/api/songs").json()[0]["id"], saved["id"])
 
+    def test_generation_constrains_drum_hit_notes_to_midi_pitches(self):
+        def openai_response_for_schema(*args, **kwargs):
+            note_schema = kwargs["json"]["text"]["format"]["schema"]["properties"]["tracks"]["items"]["properties"]["blocks"]["items"]["properties"]["note"]
+            note = "C2" if "C2" in note_schema.get("enum", []) and "drum:36" not in note_schema["enum"] else "drum:36"
+            generated = {
+                **SONG,
+                "tracks": [{
+                    **SONG["tracks"][0],
+                    "blocks": [{**SONG["tracks"][0]["blocks"][0], "note": note}],
+                }],
+            }
+            response = Mock()
+            response.json.return_value = {
+                "status": "completed",
+                "output": [{"type": "message", "content": [{"type": "output_text", "text": json.dumps(generated)}]}],
+            }
+            return response
+
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}), patch("httpx.post", side_effect=openai_response_for_schema):
+            with TestClient(app) as client:
+                response = client.post("/api/songs/generate", json={"prompt": "a song with drums"})
+                self.assertEqual(response.status_code, 201, response.text)
+                self.assertEqual(response.json()["tracks"][0]["blocks"][0]["note"], "C2")
+
     def test_editing_generated_song_keeps_original_prompt(self):
         openai_response = Mock()
         openai_response.json.return_value = {

@@ -141,6 +141,9 @@ def timestamp() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="microseconds")
 
 
+MIDI_PITCH_NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
+MIDI_NOTE_NAMES = [f"{MIDI_PITCH_NAMES[number % 12]}{number // 12 - 1}" for number in range(128)]
+
 # OpenAI's strict JSON Schema subset needs a required nullable velocity; Song remains the validation authority.
 NOTE_BLOCK_SCHEMA = {
     "type": "object",
@@ -148,7 +151,7 @@ NOTE_BLOCK_SCHEMA = {
         "id": {"type": "string"},
         "start": {"type": "number"},
         "duration": {"type": "number"},
-        "note": {"type": "string"},
+        "note": {"type": "string", "enum": MIDI_NOTE_NAMES},
         "velocity": {"type": ["integer", "null"]},
     },
     "required": ["id", "start", "duration", "note", "velocity"],
@@ -196,7 +199,8 @@ def generate_song(prompt: str) -> Song:
                     "Return only a short looping arrangement, 4 to 16 seconds long, with 1 to 4 tracks "
                     "and at least one note block. Interpret longer requests within these limits. "
                     "Use instruments drum-kit, program:0 through program:127, or drum:35 through drum:81. "
-                    "Use MIDI note names such as C4 and F#3. Give tracks unique IDs and blocks unique IDs "
+                    "The note field is always a MIDI pitch name such as C4 or F#3, including for drum hits; "
+                    "drum:36 is an instrument identifier, never a note. Give tracks unique IDs and blocks unique IDs "
                     "within each track. Starts and durations are seconds; every block must fit in the loop. "
                     "Use null velocity when no velocity is needed."
                 ),
