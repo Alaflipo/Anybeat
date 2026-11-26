@@ -7,12 +7,13 @@ import SoundTimeline from "./SoundTimeline";
 import type { SoundBlock, SoundTrack } from "./SoundTimeline";
 import type { Song } from "./song";
 import { importMidi } from "./importMidi";
-import { listSongs, loadSong, saveSong } from "./songApi";
-import type { SongSummary } from "./songApi";
+import { generateSong, listSongs, loadSong, saveSong } from "./songApi";
+import type { SavedSong, SongSummary } from "./songApi";
 
 type OperationStatus = { kind: "pending" | "success" | "error"; message: string };
 type Editor = { song: Song; saved?: { id: string; tracks: Song["tracks"] } };
 type OpenEditor = () => Promise<Editor> | Editor;
+type ProtectedAction = { run: (save: boolean) => Promise<void> };
 
 function createPianoTrack(tracks: readonly SoundTrack[]): SoundTrack {
     const names = new Set(tracks.map(({ name }) => name));
@@ -42,7 +43,13 @@ export default function App() {
     const [libraryRequest, setLibraryRequest] = useState({ openFirst: true });
     const [openStatus, setOpenStatus] = useState<OperationStatus | null>(null);
     const [saveStatus, setSaveStatus] = useState<OperationStatus | null>(null);
-    const [replacement, setReplacement] = useState<OpenEditor | null>(null);
+    const [generationPrompt, setGenerationPrompt] = useState("");
+    const [generationStatus, setGenerationStatus] = useState<OperationStatus | null>(null);
+    const [generatedToOpen, setGeneratedToOpen] = useState<{
+        song: SavedSong;
+        discardedTracks?: Song["tracks"];
+    } | null>(null);
+    const [replacement, setReplacement] = useState<ProtectedAction | null>(null);
     const fileInput = useRef<HTMLInputElement>(null);
     const nextUntitled = useRef(1);
     const song = editor?.song;
@@ -50,6 +57,8 @@ export default function App() {
     const isUnsaved = Boolean(editor && song?.tracks !== editor.saved?.tracks);
     const isOpening = libraryLoading || openStatus?.kind === "pending";
     const busy = isOpening || saveStatus?.kind === "pending";
+    const isGenerating = generationStatus?.kind === "pending";
+    const replacementBusy = busy || isGenerating;
 
     useEffect(() => {
         let cancelled = false;
@@ -98,12 +107,43 @@ export default function App() {
     }
 
     function requestReplacement(open: OpenEditor) {
-        if (busy) return;
+        if (replacementBusy) return;
         if (isUnsaved) {
             setSaveStatus(null);
-            setReplacement(() => open);
+            setReplacement({ run: () => replaceEditor(open) });
         } else {
             void replaceEditor(open);
+        }
+    }
+
+    function addSongToLibrary(saved: SongSummary) {
+        setLibrarySongs((current) => [
+            saved,
+            ...current.filter(({ id }) => id !== saved.id),
+        ]);
+    }
+
+    async function startGeneration(prompt: string, discardedTracks?: Song["tracks"]) {
+        setGenerationPrompt("");
+        setGenerationStatus({ kind: "pending", message: "Generating and saving your Song…" });
+        try {
+            const generated = await generateSong(prompt);
+            addSongToLibrary({ id: generated.id, name: generated.name });
+            setGenerationStatus({ kind: "success", message: `Song ready and saved: “${generated.name}”.` });
+            setGeneratedToOpen({ song: generated, discardedTracks });
+        } catch {
+            setGenerationStatus({ kind: "error", message: "Could not generate a Song. Try again." });
+        }
+    }
+
+    function requestGeneration() {
+        if (replacementBusy || !generationPrompt.trim()) return;
+        const prompt = generationPrompt;
+        if (isUnsaved) {
+            setSaveStatus(null);
+            setReplacement({ run: (save) => startGeneration(prompt, save ? undefined : song?.tracks) });
+        } else {
+            void startGeneration(prompt);
         }
     }
 
@@ -117,10 +157,7 @@ export default function App() {
                 ...current,
                 saved: { id: saved.id, tracks: song.tracks },
             });
-            setLibrarySongs((current) => [
-                { id: saved.id, name: saved.name },
-                ...current.filter(({ id }) => id !== saved.id),
-            ]);
+            addSongToLibrary(saved);
             setSaveStatus({ kind: "success", message: `Song saved: ${name}.` });
             return true;
         } catch {
@@ -132,9 +169,29 @@ export default function App() {
     async function confirmReplacement(save: boolean) {
         if (!replacement || busy) return;
         if (save && !await saveCurrentSong()) return;
+        const action = replacement;
         setReplacement(null);
-        await replaceEditor(replacement);
+        await action.run(save);
     }
+
+    useEffect(() => {
+        if (!generatedToOpen || busy) return;
+        // Wait for the current editor state to commit before deciding whether to protect new edits.
+        const timer = window.setTimeout(() => {
+            const open = () => ({
+                song: generatedToOpen.song,
+                saved: { id: generatedToOpen.song.id, tracks: generatedToOpen.song.tracks },
+            });
+            if (isUnsaved && editor?.song.tracks !== generatedToOpen.discardedTracks) {
+                setSaveStatus(null);
+                setReplacement({ run: () => replaceEditor(open) });
+            } else {
+                void replaceEditor(open);
+            }
+            setGeneratedToOpen(null);
+        }, 0);
+        return () => window.clearTimeout(timer);
+    }, [generatedToOpen, busy, isUnsaved, editor]);
 
     function editTracks(edit: (tracks: readonly SoundTrack[]) => readonly SoundTrack[]) {
         setEditor((current) => current && {
@@ -199,7 +256,7 @@ export default function App() {
                         size="small"
                         label="Song"
                         value={savedId ?? ""}
-                        disabled={busy || librarySongs.length === 0}
+                        disabled={replacementBusy || librarySongs.length === 0}
                         onChange={(event) => {
                             const id = event.target.value;
                             if (id !== savedId) requestReplacement(() => loadSavedEditor(id));
@@ -210,7 +267,7 @@ export default function App() {
                             <MenuItem key={id} value={id}>{name}</MenuItem>
                         ))}
                     </TextField>
-                    <Button disabled={busy} onClick={() => requestReplacement(() => ({
+                    <Button disabled={replacementBusy} onClick={() => requestReplacement(() => ({
                         song: {
                             name: `Untitled song ${nextUntitled.current++}`,
                             loopSeconds: 8,
@@ -220,7 +277,7 @@ export default function App() {
                     <Button disabled={!song || busy} onClick={() => void saveCurrentSong()}>
                         Save song
                     </Button>
-                    <Button disabled={busy} onClick={() => fileInput.current?.click()}>Upload MIDI</Button>
+                    <Button disabled={replacementBusy} onClick={() => fileInput.current?.click()}>Upload MIDI</Button>
                     <input
                         ref={fileInput}
                         type="file"
@@ -235,10 +292,32 @@ export default function App() {
                         }}
                     />
                 </Stack>
+                <Stack direction="row" useFlexGap spacing={2} sx={{ alignItems: "flex-start", flexWrap: "wrap", mb: 2 }}>
+                    <TextField
+                        multiline
+                        minRows={2}
+                        size="small"
+                        label="Generation prompt"
+                        placeholder="Create a happy song"
+                        value={generationPrompt}
+                        onChange={(event) => setGenerationPrompt(event.target.value)}
+                        sx={{ width: "min(100%, 450px)" }}
+                    />
+                    <Button
+                        variant="contained"
+                        disabled={replacementBusy || !generationPrompt.trim()}
+                        onClick={requestGeneration}
+                    >Generate</Button>
+                </Stack>
+                {generationStatus && (
+                    <Alert severity={generationStatus.kind === "pending" ? "info" : generationStatus.kind} sx={{ mb: 2 }}>
+                        {generationStatus.message}
+                    </Alert>
+                )}
                 {libraryLoading && <Typography role="status" sx={{ mb: 2 }}>Loading saved songs…</Typography>}
                 {libraryError && (
                     <Alert severity="error" sx={{ mb: 2 }} action={
-                        <Button color="inherit" disabled={busy} onClick={() => {
+                        <Button color="inherit" disabled={replacementBusy} onClick={() => {
                             setLibraryError("");
                             setLibraryLoading(true);
                             setLibraryRequest({ openFirst: !editor });
@@ -283,7 +362,7 @@ export default function App() {
             >
                 <DialogTitle id="unsaved-song-title">Unsaved changes</DialogTitle>
                 <DialogContent>
-                    <Typography>Save changes to “{song?.name}” before switching songs?</Typography>
+                    <Typography>Save changes to “{song?.name}” before continuing?</Typography>
                     {saveStatus && (
                         <Alert severity={saveStatus.kind === "pending" ? "info" : saveStatus.kind} sx={{ mt: 2 }}>
                             {saveStatus.message}
