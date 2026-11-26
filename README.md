@@ -29,3 +29,10 @@ npm run dev
 ```
 
 The frontend uses React, TypeScript, Vite, and SpessaSynth for MIDI playback. Run `npm run build` and `npm run lint` from `frontend` to check changes.
+
+## Populate the database with some demo songs: 
+
+`docker compose exec backend python -m import_demo_songs`
+
+## delete the current databse: 
+ `docker compose exec backend python -c "import sqlite3; db = sqlite3.connect('/data/songs.sqlite3'); db.execute('DELETE FROM songs'); db.commit(); db.close()"`

@@ -196,8 +196,6 @@ def generate_song(prompt: str) -> Song:
                 "model": model,
                 "instructions": (
                     "Compose a playable Anybeat Song matching the user's musical idea. "
-                    "Return only a short looping arrangement, 4 to 16 seconds long, with 1 to 4 tracks "
-                    "and at least one note block. Interpret longer requests within these limits. "
                     "Use instruments drum-kit, program:0 through program:127, or drum:35 through drum:81. "
                     "The note field is always a MIDI pitch name such as C4 or F#3, including for drum hits; "
                     "drum:36 is an instrument identifier, never a note. Give tracks unique IDs and blocks unique IDs "
@@ -224,8 +222,8 @@ def generate_song(prompt: str) -> Song:
             if content["type"] == "output_text"
         )
         song = Song.model_validate_json(text)
-        if not 4 <= song.loopSeconds <= 16 or len(song.tracks) > 4 or not any(track.blocks for track in song.tracks):
-            raise ValueError("Generated song exceeds arrangement limits")
+        # if not 4 <= song.loopSeconds <= 16 or len(song.tracks) > 4 or not any(track.blocks for track in song.tracks):
+        #     raise ValueError("Generated song exceeds arrangement limits")
         return song
     except (httpx.HTTPError, ValueError, ValidationError, KeyError, StopIteration, TypeError, IndexError):
         raise HTTPException(status_code=502, detail="Song generation failed") from None
