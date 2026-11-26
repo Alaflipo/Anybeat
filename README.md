@@ -30,6 +30,24 @@ npm run dev
 
 The frontend uses React, TypeScript, Vite, and SpessaSynth for MIDI playback. Run `npm run build` and `npm run lint` from `frontend` to check changes.
 
+## Generate a song with Ollama
+
+Install and start [Ollama](https://ollama.com/), then download the model:
+
+```sh
+ollama pull qwen3.5:2b
+```
+
+Choose Ollama in the Provider dropdown beside the generation prompt, or call the backend's `POST /api/songs/generate/ollama` endpoint directly with the same `{"prompt": "..."}` body as the OpenAI endpoint. The endpoint uses the `OLLAMA_MODEL` setting, which defaults to `qwen3.5:2b`, validates the result as a Song, saves it, and returns the saved song with its original prompt. Ollama must be reachable from the backend container. On macOS, the Ollama app binds to localhost by default; to let Docker reach it, run `launchctl setenv OLLAMA_HOST "0.0.0.0:11434"` and restart the Ollama app. This exposes Ollama on your local network, so use it only on a trusted network. The Docker backend uses `http://host.docker.internal:11434` by default. Set `OLLAMA_BASE_URL` or `OLLAMA_MODEL` in `.env` to use a different address or model, and recreate the backend container after changing them. Ollama errors appear in the app, with no automatic fallback to OpenAI.
+
+```sh
+curl -X POST http://localhost:8000/api/songs/generate/ollama \
+  -H 'Content-Type: application/json' \
+  -d '{"prompt":"Create a cheerful piano and drum loop"}'
+```
+
+The Provider dropdown defaults to Ollama. OpenAI remains available in the dropdown.
+
 ## Populate the database with some demo songs: 
 
 `docker compose exec backend python -m import_demo_songs`

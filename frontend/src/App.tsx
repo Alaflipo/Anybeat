@@ -8,7 +8,7 @@ import type { SoundBlock, SoundTrack } from "./SoundTimeline";
 import type { Song } from "./song";
 import { importMidi } from "./importMidi";
 import { generateSong, listSongs, loadSong, saveSong } from "./songApi";
-import type { SavedSong, SongSummary } from "./songApi";
+import type { GenerationProvider, SavedSong, SongSummary } from "./songApi";
 
 type OperationStatus = { kind: "pending" | "success" | "error"; message: string };
 type Editor = { song: Song; saved?: { id: string; tracks: Song["tracks"] } };
@@ -44,6 +44,7 @@ export default function App() {
     const [openStatus, setOpenStatus] = useState<OperationStatus | null>(null);
     const [saveStatus, setSaveStatus] = useState<OperationStatus | null>(null);
     const [generationPrompt, setGenerationPrompt] = useState("");
+    const [generationProvider, setGenerationProvider] = useState<GenerationProvider>("ollama");
     const [generationStatus, setGenerationStatus] = useState<OperationStatus | null>(null);
     const [generatedToOpen, setGeneratedToOpen] = useState<{
         song: SavedSong;
@@ -123,27 +124,36 @@ export default function App() {
         ]);
     }
 
-    async function startGeneration(prompt: string, discardedTracks?: Song["tracks"]) {
+    async function startGeneration(
+        prompt: string,
+        provider: GenerationProvider,
+        discardedTracks?: Song["tracks"],
+    ) {
         setGenerationPrompt("");
         setGenerationStatus({ kind: "pending", message: "Generating and saving your Song…" });
         try {
-            const generated = await generateSong(prompt);
+            const generated = await generateSong(prompt, provider);
             addSongToLibrary({ id: generated.id, name: generated.name });
             setGenerationStatus({ kind: "success", message: `Song ready and saved: “${generated.name}”.` });
             setGeneratedToOpen({ song: generated, discardedTracks });
-        } catch {
-            setGenerationStatus({ kind: "error", message: "Could not generate a Song. Try again." });
+        } catch (cause) {
+            const message = cause instanceof Error ? cause.message : "Could not generate a Song.";
+            setGenerationStatus({
+                kind: "error",
+                message: provider === "ollama" ? message : "Could not generate a Song. Try again.",
+            });
         }
     }
 
     function requestGeneration() {
         if (replacementBusy || !generationPrompt.trim()) return;
         const prompt = generationPrompt;
+        const provider = generationProvider;
         if (isUnsaved) {
             setSaveStatus(null);
-            setReplacement({ run: (save) => startGeneration(prompt, save ? undefined : song?.tracks) });
+            setReplacement({ run: (save) => startGeneration(prompt, provider, save ? undefined : song?.tracks) });
         } else {
-            void startGeneration(prompt);
+            void startGeneration(prompt, provider);
         }
     }
 
@@ -303,6 +313,18 @@ export default function App() {
                         onChange={(event) => setGenerationPrompt(event.target.value)}
                         sx={{ width: "min(100%, 450px)" }}
                     />
+                    <TextField
+                        select
+                        size="small"
+                        label="Provider"
+                        value={generationProvider}
+                        disabled={replacementBusy}
+                        onChange={(event) => setGenerationProvider(event.target.value as GenerationProvider)}
+                        sx={{ width: "min(100%, 180px)" }}
+                    >
+                        <MenuItem value="ollama">Ollama</MenuItem>
+                        <MenuItem value="openai">OpenAI</MenuItem>
+                    </TextField>
                     <Button
                         variant="contained"
                         disabled={replacementBusy || !generationPrompt.trim()}

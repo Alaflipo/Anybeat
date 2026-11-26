@@ -10,6 +10,7 @@ from typing import Annotated, Iterator, Self
 from uuid import uuid4
 
 import httpx
+import ollama
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
@@ -182,6 +183,15 @@ SONG_SCHEMA = {
     "additionalProperties": False,
 }
 
+SONG_INSTRUCTIONS = (
+    "Compose a playable Anybeat Song matching the user's musical idea. "
+    "Use instruments drum-kit, program:0 through program:127, or drum:35 through drum:81. "
+    "The note field is always a MIDI pitch name such as C4 or F#3, including for drum hits; "
+    "drum:36 is an instrument identifier, never a note. Give tracks unique IDs and blocks unique IDs "
+    "within each track. Starts and durations are seconds; every block must fit in the loop. "
+    "Use null velocity when no velocity is needed."
+)
+
 
 def generate_song(prompt: str) -> Song:
     api_key = os.environ.get("OPENAI_API_KEY")
@@ -194,14 +204,7 @@ def generate_song(prompt: str) -> Song:
             headers={"Authorization": f"Bearer {api_key}"},
             json={
                 "model": model,
-                "instructions": (
-                    "Compose a playable Anybeat Song matching the user's musical idea. "
-                    "Use instruments drum-kit, program:0 through program:127, or drum:35 through drum:81. "
-                    "The note field is always a MIDI pitch name such as C4 or F#3, including for drum hits; "
-                    "drum:36 is an instrument identifier, never a note. Give tracks unique IDs and blocks unique IDs "
-                    "within each track. Starts and durations are seconds; every block must fit in the loop. "
-                    "Use null velocity when no velocity is needed."
-                ),
+                "instructions": SONG_INSTRUCTIONS,
                 "input": prompt,
                 "max_output_tokens": 6000,
                 "text": {"format": {"type": "json_schema", "name": "song", "strict": True, "schema": SONG_SCHEMA}},
@@ -229,9 +232,63 @@ def generate_song(prompt: str) -> Song:
         raise HTTPException(status_code=502, detail="Song generation failed") from None
 
 
+def generate_song_with_ollama(prompt: str) -> Song:
+    model = os.environ.get("OLLAMA_MODEL", "qwen3.5:2b")
+    base_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+    client = ollama.Client(host=base_url, timeout=120.0)
+    try:
+        response = client.chat(
+            model=model,
+            messages=[
+                {"role": "system", "content": SONG_INSTRUCTIONS},
+                {"role": "user", "content": prompt},
+            ],
+            format=SONG_SCHEMA,
+            options={"temperature": 0},
+            stream=False,
+        )
+        return Song.model_validate_json(response.message.content)
+    except ConnectionError:
+        raise HTTPException(
+            status_code=503,
+            detail="Ollama is unavailable. Check that it is running and reachable from the backend.",
+        ) from None
+    except ollama.ResponseError as error:
+        if error.status_code == 404:
+            detail = f"Ollama model '{model}' is unavailable. Pull it with `ollama pull {model}`."
+            status_code = 503
+        else:
+            detail = "Ollama could not generate a Song."
+            status_code = 502
+        raise HTTPException(status_code=status_code, detail=detail) from None
+    except httpx.TimeoutException:
+        raise HTTPException(
+            status_code=504,
+            detail="Ollama generation timed out after 120 seconds. Try again.",
+        ) from None
+    except (ValidationError, ValueError, TypeError, AttributeError):
+        raise HTTPException(
+            status_code=502,
+            detail="Ollama returned invalid Song data. Try generating again.",
+        ) from None
+    except httpx.HTTPError:
+        raise HTTPException(
+            status_code=503,
+            detail="Ollama is unavailable. Check that it is running and reachable from the backend.",
+        ) from None
+    finally:
+        client.close()
+
+
 @router.post("/generate", status_code=201, response_model_exclude_none=True)
 def generate_and_save_song(data: GenerationRequest, request: Request) -> SavedSong:
     song = generate_song(data.prompt)
+    return save_song(song, request.app.state.song_db_path, data.prompt)
+
+
+@router.post("/generate/ollama", status_code=201, response_model_exclude_none=True)
+def generate_and_save_song_with_ollama(data: GenerationRequest, request: Request) -> SavedSong:
+    song = generate_song_with_ollama(data.prompt)
     return save_song(song, request.app.state.song_db_path, data.prompt)
 
 
