@@ -8,6 +8,10 @@ Anybeat uses a looping timeline to arrange and play music.
 
 A looping timeline with a shared duration and one or more tracks.
 
+**Generation prompt**
+
+The original text instruction used to generate a Song. It remains the Song's provenance after later edits.
+
 **Track**
 
 A row in an song that holds note blocks and has one assigned instrument.

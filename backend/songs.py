@@ -9,8 +9,9 @@ from pathlib import Path
 from typing import Annotated, Iterator, Self
 from uuid import uuid4
 
+import httpx
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 router = APIRouter(prefix="/api/songs", tags=["songs"])
 
@@ -85,6 +86,18 @@ class Song(SongData):
 
 class SavedSong(Song):
     id: str
+    generationPrompt: str | None = None
+
+
+class GenerationRequest(SongData):
+    prompt: Annotated[str, Field(min_length=1, max_length=500)]
+
+    @field_validator("prompt")
+    @classmethod
+    def nonblank_prompt(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Generation prompt cannot be blank")
+        return value
 
 
 class SongSummary(BaseModel):
@@ -114,27 +127,126 @@ def initialize_library(path: Path) -> None:
                 name TEXT NOT NULL,
                 payload TEXT NOT NULL,
                 created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
+                updated_at TEXT NOT NULL,
+                generation_prompt TEXT
             )
             """
         )
+        columns = {row["name"] for row in connection.execute("PRAGMA table_info(songs)")}
+        if "generation_prompt" not in columns:
+            connection.execute("ALTER TABLE songs ADD COLUMN generation_prompt TEXT")
 
 
 def timestamp() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="microseconds")
 
 
-@router.post("", status_code=201, response_model_exclude_none=True)
-def create_song(song: Song, request: Request) -> SavedSong:
+# OpenAI's strict JSON Schema subset needs a required nullable velocity; Song remains the validation authority.
+NOTE_BLOCK_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "id": {"type": "string"},
+        "start": {"type": "number"},
+        "duration": {"type": "number"},
+        "note": {"type": "string"},
+        "velocity": {"type": ["integer", "null"]},
+    },
+    "required": ["id", "start", "duration", "note", "velocity"],
+    "additionalProperties": False,
+}
+
+SONG_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "name": {"type": "string"},
+        "loopSeconds": {"type": "number"},
+        "tracks": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "name": {"type": "string"},
+                    "instrument": {"type": "string"},
+                    "blocks": {"type": "array", "items": NOTE_BLOCK_SCHEMA},
+                },
+                "required": ["id", "name", "instrument", "blocks"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["name", "loopSeconds", "tracks"],
+    "additionalProperties": False,
+}
+
+
+def generate_song(prompt: str) -> Song:
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="Song generation is not configured")
+    model = os.environ.get("OPENAI_SONG_MODEL", "gpt-5.4-mini")
+    try:
+        response = httpx.post(
+            "https://api.openai.com/v1/responses",
+            headers={"Authorization": f"Bearer {api_key}"},
+            json={
+                "model": model,
+                "instructions": (
+                    "Compose a playable Anybeat Song matching the user's musical idea. "
+                    "Return only a short looping arrangement, 4 to 16 seconds long, with 1 to 4 tracks "
+                    "and at least one note block. Interpret longer requests within these limits. "
+                    "Use instruments drum-kit, program:0 through program:127, or drum:35 through drum:81. "
+                    "Use MIDI note names such as C4 and F#3. Give tracks unique IDs and blocks unique IDs "
+                    "within each track. Starts and durations are seconds; every block must fit in the loop. "
+                    "Use null velocity when no velocity is needed."
+                ),
+                "input": prompt,
+                "max_output_tokens": 6000,
+                "text": {"format": {"type": "json_schema", "name": "song", "strict": True, "schema": SONG_SCHEMA}},
+            },
+            timeout=30,
+        )
+        response.raise_for_status()
+        result = response.json()
+        if not isinstance(result, dict):
+            raise ValueError("Unexpected OpenAI response")
+        if result.get("status") != "completed":
+            raise ValueError("Response did not complete")
+        text = next(
+            content["text"]
+            for item in result["output"]
+            if item["type"] == "message"
+            for content in item["content"]
+            if content["type"] == "output_text"
+        )
+        song = Song.model_validate_json(text)
+        if not 4 <= song.loopSeconds <= 16 or len(song.tracks) > 4 or not any(track.blocks for track in song.tracks):
+            raise ValueError("Generated song exceeds arrangement limits")
+        return song
+    except (httpx.HTTPError, ValueError, ValidationError, KeyError, StopIteration, TypeError, IndexError):
+        raise HTTPException(status_code=502, detail="Song generation failed") from None
+
+
+@router.post("/generate", status_code=201, response_model_exclude_none=True)
+def generate_and_save_song(data: GenerationRequest, request: Request) -> SavedSong:
+    song = generate_song(data.prompt)
+    return save_song(song, request.app.state.song_db_path, data.prompt)
+
+
+def save_song(song: Song, path: Path, generation_prompt: str | None = None) -> SavedSong:
     song_id = str(uuid4())
     now = timestamp()
-    payload = song.storage_payload()
-    with connect(request.app.state.song_db_path) as connection:
+    with connect(path) as connection:
         connection.execute(
-            "INSERT INTO songs (id, name, payload, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
-            (song_id, song.name, payload, now, now),
+            "INSERT INTO songs (id, name, payload, created_at, updated_at, generation_prompt) VALUES (?, ?, ?, ?, ?, ?)",
+            (song_id, song.name, song.storage_payload(), now, now, generation_prompt),
         )
-    return SavedSong(id=song_id, **song.model_dump())
+    return SavedSong(id=song_id, generationPrompt=generation_prompt, **song.model_dump())
+
+
+@router.post("", status_code=201, response_model_exclude_none=True)
+def create_song(song: Song, request: Request) -> SavedSong:
+    return save_song(song, request.app.state.song_db_path)
 
 
 @router.get("")
@@ -150,11 +262,11 @@ def list_songs(request: Request) -> list[SongSummary]:
 def load_song(song_id: str, request: Request) -> SavedSong:
     with connect(request.app.state.song_db_path) as connection:
         row = connection.execute(
-            "SELECT name, payload FROM songs WHERE id = ?", (song_id,)
+            "SELECT name, payload, generation_prompt FROM songs WHERE id = ?", (song_id,)
         ).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail="Song not found")
-    return SavedSong(id=song_id, name=row["name"], **json.loads(row["payload"]))
+    return SavedSong(id=song_id, name=row["name"], generationPrompt=row["generation_prompt"], **json.loads(row["payload"]))
 
 
 @router.put("/{song_id}", response_model_exclude_none=True)
@@ -167,4 +279,5 @@ def update_song(song_id: str, song: Song, request: Request) -> SavedSong:
         )
         if result.rowcount == 0:
             raise HTTPException(status_code=404, detail="Song not found")
-    return SavedSong(id=song_id, **song.model_dump())
+        row = connection.execute("SELECT generation_prompt FROM songs WHERE id = ?", (song_id,)).fetchone()
+    return SavedSong(id=song_id, generationPrompt=row["generation_prompt"], **song.model_dump())
