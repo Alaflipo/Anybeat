@@ -153,7 +153,7 @@ NOTE_BLOCK_SCHEMA = {
         "start": {"type": "number"},
         "duration": {"type": "number"},
         "note": {"type": "string", "enum": MIDI_NOTE_NAMES},
-        "velocity": {"type": ["integer", "null"]},
+        "velocity": {"type": ["integer", "null"], "minimum": 1, "maximum": 127},
     },
     "required": ["id", "start", "duration", "note", "velocity"],
     "additionalProperties": False,
@@ -185,6 +185,7 @@ SONG_SCHEMA = {
 
 SONG_INSTRUCTIONS = (
     "Compose a playable Anybeat Song matching the user's musical idea. "
+    "Restrict to model from 4 to 16 seconds in length, with no more than 10 tracks, and at least one track containing note blocks. "
     "Use instruments drum-kit, program:0 through program:127, or drum:35 through drum:81. "
     "The note field is always a MIDI pitch name such as C4 or F#3, including for drum hits; "
     "drum:36 is an instrument identifier, never a note. Give tracks unique IDs and blocks unique IDs "
@@ -197,7 +198,7 @@ def generate_song(prompt: str) -> Song:
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         raise HTTPException(status_code=503, detail="Song generation is not configured")
-    model = os.environ.get("OPENAI_SONG_MODEL", "gpt-5.4-mini")
+    model = os.environ.get("OPENAI_SONG_MODEL", "gpt-6.2-sol")
     try:
         response = httpx.post(
             "https://api.openai.com/v1/responses",
@@ -209,7 +210,7 @@ def generate_song(prompt: str) -> Song:
                 "max_output_tokens": 6000,
                 "text": {"format": {"type": "json_schema", "name": "song", "strict": True, "schema": SONG_SCHEMA}},
             },
-            timeout=30,
+            timeout=90,
         )
         response.raise_for_status()
         result = response.json()
@@ -246,6 +247,7 @@ def generate_song_with_ollama(prompt: str) -> Song:
             format=SONG_SCHEMA,
             options={"temperature": 0},
             stream=False,
+            think=False,
         )
         return Song.model_validate_json(response.message.content)
     except ConnectionError:
